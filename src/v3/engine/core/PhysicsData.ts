@@ -1,23 +1,19 @@
 // src/v3/engine/core/PhysicsData.ts
 import * as THREE from 'three';
-import { PHYSICS_CONSTANTS } from '../../shared/constants';
 
 export interface InteractionState {
     active: boolean;
     particleIndex: number;
-    target: THREE.Vector3; // Mouse position in 3D
+    target: THREE.Vector3;
 }
 
 export class PhysicsData {
     public readonly count: number;
-
-    // Structure of Arrays (SoA) for performance
     public positions: Float32Array;
     public prevPositions: Float32Array;
     public invMass: Float32Array;
-    public normals: Float32Array; // For future wind/aerodynamics
+    public normals: Float32Array;
 
-    // Interaction State
     public interaction: InteractionState = {
         active: false,
         particleIndex: -1,
@@ -50,12 +46,8 @@ export class PhysicsData {
             this.prevPositions[i * 3 + 1] = y;
             this.prevPositions[i * 3 + 2] = z;
 
-            // Pin the top row (neck) if needed, otherwise rely on collision
-            if (y > PHYSICS_CONSTANTS.pinHeight) {
-                this.invMass[i] = 0;
-            } else {
-                this.invMass[i] = 1.0;
-            }
+            // --- FIX: Default to 1.0 (Movable). Pinning is now handled by Solver/Topology. ---
+            this.invMass[i] = 1.0;
         }
     }
 

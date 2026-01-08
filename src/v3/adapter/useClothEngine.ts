@@ -15,14 +15,34 @@ export function useClothEngine(
     const skinningRef = useRef<SkinningData | null>(null);
     const initialized = useRef(false);
 
-    // Reusable normal vector
+    const accumulator = useRef(0);
+    const FIXED_STEP = 1 / 60; // 16.6ms
+    // --- NEW: Safety cap to prevent freezing ---
+    const MAX_STEPS = 2;
+
     const pA = new THREE.Vector3();
     const pB = new THREE.Vector3();
     const pC = new THREE.Vector3();
 
     useEffect(() => {
         if (!proxyMesh || !visualMesh || !mannequinMesh || initialized.current) return;
+
         console.log('[Adapter] Initializing Physics Engine V3...');
+
+        // Debug: Check bounds to verify pinHeight
+        proxyMesh.geometry.computeBoundingBox();
+        const bounds = proxyMesh.geometry.boundingBox;
+        if (bounds) {
+            console.log(`[Physics] Proxy Mesh Height Range: Y=[${bounds.min.y.toFixed(2)}, ${bounds.max.y.toFixed(2)}]`);
+            console.log(`[Physics] Pin Radius Threshold: ${PHYSICS_CONSTANTS.pinRadius}`);
+            if (bounds.max.y < PHYSICS_CONSTANTS.pinRadius) {
+                console.warn("⚠️ WARNING: Mesh is shorter than pinRadius! No vertices will be pinned.");
+            }
+        }
+
+        proxyMesh.updateMatrixWorld(true);
+        mannequinMesh.updateMatrixWorld(true);
+
         const engine = new Solver(proxyMesh, mannequinMesh);
         engineRef.current = engine;
         skinningRef.current = computeSkinning(visualMesh, proxyMesh);
@@ -34,17 +54,32 @@ export function useClothEngine(
         const skinning = skinningRef.current;
         if (!engine || !proxyMesh || !visualMesh || !skinning) return;
 
-        const dt = Math.min(delta, 0.032);
-        engine.update(dt);
+        // --- FIX: Prevent Spiral of Death ---
+        // 1. Cap the delta time (e.g., if tab was inactive)
+        let frameTime = Math.min(delta, 0.1);
+        accumulator.current += frameTime;
+
+        // 2. Run fixed steps with a safety exit
+        let steps = 0;
+        while (accumulator.current >= FIXED_STEP && steps < MAX_STEPS) {
+            engine.update(FIXED_STEP);
+            accumulator.current -= FIXED_STEP;
+            steps++;
+        }
+
+        // 3. If we are still behind, discard the accumulated time to avoid catch-up lag
+        if (accumulator.current > FIXED_STEP) {
+            accumulator.current = 0;
+        }
+        // ------------------------------------
 
         const visualPos = visualMesh.geometry.attributes.position;
-        const visualNormals = visualMesh.geometry.attributes.normal; // Need normals for bias
+        const visualNormals = visualMesh.geometry.attributes.normal;
         const proxyPos = engine.data.positions;
         const physicsIndex = proxyMesh.geometry.index!;
         const { indices, weights } = skinning;
 
-        // Visual Bias (Thickness Simulation)
-        const BIAS = 0.002; // 2mm offset
+        const BIAS = 0.002;
 
         for (let i = 0; i < visualPos.count; i++) {
             const faceIdx = indices[i];
@@ -60,14 +95,10 @@ export function useClothEngine(
             pB.set(proxyPos[idxB], proxyPos[idxB + 1], proxyPos[idxB + 2]);
             pC.set(proxyPos[idxC], proxyPos[idxC + 1], proxyPos[idxC + 2]);
 
-            // Interpolated Position
             const x = pA.x * w1 + pB.x * w2 + pC.x * w3;
             const y = pA.y * w1 + pB.y * w2 + pC.y * w3;
             const z = pA.z * w1 + pB.z * w2 + pC.z * w3;
 
-            // Apply Bias along Visual Normal
-            // Note: visualNormals might be slightly outdated until computeVertexNormals is called,
-            // but it's stable enough for bias direction.
             const nx = visualNormals.getX(i);
             const ny = visualNormals.getY(i);
             const nz = visualNormals.getZ(i);
@@ -77,7 +108,6 @@ export function useClothEngine(
 
         visualPos.needsUpdate = true;
         visualMesh.geometry.computeVertexNormals();
-        visualMesh.geometry.computeBoundingSphere();
 
         if (PHYSICS_CONSTANTS.debug.showProxy) {
             engine.data.syncToMesh(proxyMesh);
