@@ -25,8 +25,8 @@ export class MannequinCollider {
     private tempTri = new THREE.Triangle();
 
     // Tuning
-    private readonly SURFACE_OFFSET = 0.015;
-    private readonly RESCUE_OFFSET = 0.02;
+    private readonly SURFACE_OFFSET = 0.012;
+    private readonly RESCUE_OFFSET = 0.012;
 
     public setMesh(mesh: THREE.Mesh) {
         this.mesh = mesh;

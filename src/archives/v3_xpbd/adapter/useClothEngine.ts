@@ -34,9 +34,9 @@ export function useClothEngine(
         const bounds = proxyMesh.geometry.boundingBox;
         if (bounds) {
             console.log(`[Physics] Proxy Mesh Height Range: Y=[${bounds.min.y.toFixed(2)}, ${bounds.max.y.toFixed(2)}]`);
-            console.log(`[Physics] Pin Radius Threshold: ${PHYSICS_CONSTANTS.pinRadius}`);
-            if (bounds.max.y < PHYSICS_CONSTANTS.pinRadius) {
-                console.warn("⚠️ WARNING: Mesh is shorter than pinRadius! No vertices will be pinned.");
+            console.log(`[Physics] Pin Radius Threshold: ${PHYSICS_CONSTANTS.pinDepth}`);
+            if (bounds.max.y < PHYSICS_CONSTANTS.pinDepth) {
+                console.warn("⚠️ WARNING: Mesh is shorter than pinDepth! No vertices will be pinned.");
             }
         }
 
@@ -79,7 +79,7 @@ export function useClothEngine(
         const physicsIndex = proxyMesh.geometry.index!;
         const { indices, weights } = skinning;
 
-        const BIAS = 0.002;
+        const BIAS = 0.005;
 
         for (let i = 0; i < visualPos.count; i++) {
             const faceIdx = indices[i];

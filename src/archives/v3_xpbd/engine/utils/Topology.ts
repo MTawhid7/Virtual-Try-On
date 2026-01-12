@@ -24,39 +24,26 @@ export class Topology {
         return adj;
     }
 
-    // --- NEW: Pin based on proximity to the highest point (Collar) ---
-    public static getNeckIndices(positions: Float32Array, pinRadius: number): Set<number> {
+    // --- NEW: Pin based on Vertical Height (Top 3cm) ---
+    // This ensures both left and right sides of the collar are pinned equally.
+    public static getNeckIndices(positions: Float32Array, pinDepth: number): Set<number> {
         const indices = new Set<number>();
         const count = positions.length / 3;
 
-        // 1. Find the highest vertex (Max Y)
+        // 1. Find the absolute highest Y value
         let maxY = -Infinity;
-        let maxIndex = -1;
+        for (let i = 0; i < count; i++) {
+            const y = positions[i * 3 + 1];
+            if (y > maxY) maxY = y;
+        }
+
+        // 2. Pin everything within 'pinDepth' of the top
+        // e.g., if Top is 1.55m and depth is 0.03m, pin everything above 1.52m
+        const threshold = maxY - pinDepth;
 
         for (let i = 0; i < count; i++) {
             const y = positions[i * 3 + 1];
-            if (y > maxY) {
-                maxY = y;
-                maxIndex = i;
-            }
-        }
-
-        if (maxIndex === -1) return indices;
-
-        // 2. Pin everything within 'pinRadius' of the highest vertex
-        const idxPeak = maxIndex * 3;
-        const px = positions[idxPeak];
-        const py = positions[idxPeak + 1];
-        const pz = positions[idxPeak + 2];
-        const radiusSq = pinRadius * pinRadius;
-
-        for (let i = 0; i < count; i++) {
-            const idx = i * 3;
-            const dx = positions[idx] - px;
-            const dy = positions[idx + 1] - py;
-            const dz = positions[idx + 2] - pz;
-
-            if (dx * dx + dy * dy + dz * dz < radiusSq) {
+            if (y >= threshold) {
                 indices.add(i);
             }
         }

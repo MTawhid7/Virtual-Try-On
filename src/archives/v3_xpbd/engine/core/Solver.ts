@@ -23,10 +23,10 @@ export class Solver {
     constructor(proxyMesh: THREE.Mesh, collisionMesh: THREE.Mesh) {
         this.data = new PhysicsData(proxyMesh);
 
-        // 1. Identify Neck Vertices
-        const neckIndices = Topology.getNeckIndices(this.data.positions, PHYSICS_CONSTANTS.pinRadius);
+        // --- UPDATED: Use pinDepth (Vertical Slice) ---
+        const neckIndices = Topology.getNeckIndices(this.data.positions, PHYSICS_CONSTANTS.pinDepth);
 
-        // --- FIX: Apply Pinning (Set Mass to 0) ---
+        // Apply Pinning
         neckIndices.forEach(index => {
             this.data.invMass[index] = 0;
         });
@@ -36,20 +36,21 @@ export class Solver {
         this.tetherConstraints = new TetherConstraint(proxyMesh.geometry, this.data, neckIndices);
         this.mouseConstraint = new MouseConstraint();
 
+        // ... rest of constructor ...
         this.collider = new MannequinCollider();
         this.collider.setMesh(collisionMesh);
-
         this.selfCollider = new SpatialHash(this.data.count);
     }
 
-    // ... rest of the file remains unchanged ...
     public update(dt: number) {
-        const substeps = PHYSICS_CONSTANTS.substeps;
+        const substeps = PHYSICS_CONSTANTS.substeps; // 10
         const sdt = dt / substeps;
 
         this.collider.updateMatrix();
 
-        const collisionFreq = 5;
+        // FIX 1: Check collision more often (Every 2 steps instead of 5)
+        // This prevents the cloth from sinking too deep between checks.
+        const collisionFreq = 2;
 
         for (let step = 0; step < substeps; step++) {
             this.integrate(sdt);
@@ -63,7 +64,8 @@ export class Solver {
                 this.solveCollisions();
             }
 
-            if (step % collisionFreq === 0) {
+            // Self collision can remain lazy (every 5 steps is fine)
+            if (step % 5 === 0) {
                 this.selfCollider.solve(this.data);
             }
         }
@@ -121,6 +123,8 @@ export class Solver {
                 let vz = this.data.positions[idx + 2] - this.data.prevPositions[idx + 2];
 
                 if (result.rescued) {
+                    // FIX 2: If rescued (was inside body), KILL velocity but DO NOT SLEEP.
+                    // We want it to stay right here on the surface, not drift back in.
                     vx = vy = vz = 0;
                 } else {
                     const nx = result.normal.x;
@@ -139,6 +143,8 @@ export class Solver {
                     vy *= (1 - friction);
                     vz *= (1 - friction);
 
+                    // FIX 3: Only sleep if we are NOT in a rescue state.
+                    // (Implicitly handled because we are in the 'else' block of result.rescued)
                     const vSq = vx * vx + vy * vy + vz * vz;
                     if (vSq < sleepThresholdSq) {
                         vx = 0;

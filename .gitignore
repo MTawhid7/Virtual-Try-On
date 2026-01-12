@@ -7,10 +7,20 @@ yarn-error.log*
 pnpm-debug.log*
 lerna-debug.log*
 
+# Dependencies
 node_modules
+.pnp
+.pnp.js
+
+# Build Output
 dist
 dist-ssr
 *.local
+
+# Rust / WASM
+physics-core/target
+physics-core/pkg
+**/*.rs.bk
 
 # Editor directories and files
 .vscode/*
