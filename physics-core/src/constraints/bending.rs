@@ -76,7 +76,7 @@ impl BendingConstraint {
     pub fn solve(&self, data: &mut PhysicsData, dt: f32) {
         // TUNING: Bending Compliance
         // 0.5 = Soft (Cotton), 0.01 = Stiff (Leather)
-        let compliance = 0.005;
+        let compliance = 0.5;
         let alpha = compliance / (dt * dt);
 
         for i in 0..self.rest_lengths.len() {

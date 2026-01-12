@@ -1,5 +1,4 @@
 .
-├── .DS_Store
 ├── .gitignore
 ├── FUTURE_PLAN.md
 ├── README.md
@@ -10,191 +9,27 @@
 ├── physics-core
 │   ├── Cargo.lock
 │   ├── Cargo.toml
-│   ├── pkg
-│   │   ├── .gitignore
-│   │   ├── package.json
-│   │   ├── physics_core.d.ts
-│   │   ├── physics_core.js
-│   │   ├── physics_core_bg.wasm
-│   │   └── physics_core_bg.wasm.d.ts
-│   ├── src
-│   │   ├── collider
-│   │   │   ├── mod.rs
-│   │   │   └── sdf.rs
-│   │   ├── constraints
-│   │   │   ├── bending.rs
-│   │   │   ├── distance.rs
-│   │   │   ├── mod.rs
-│   │   │   └── tether.rs
-│   │   ├── data.rs
-│   │   ├── lib.rs
-│   │   └── utils.rs
-│   └── target
-│       ├── .rustc_info.json
-│       ├── CACHEDIR.TAG
-│       ├── debug
-│       │   ├── .cargo-lock
-│       │   ├── .fingerprint
-│       │   │   ├── bumpalo-074e47f4800c60f5
-│       │   │   ├── cfg-if-eed30869daa6a03e
-│       │   │   ├── console_error_panic_hook-9b34c416e5da7bd7
-│       │   │   ├── js-sys-ecb6bc41bc5aeda2
-│       │   │   ├── once_cell-fa1b64d685be538f
-│       │   │   ├── physics-core-0c87ee94897addce
-│       │   │   ├── physics-core-1e359c2f0f8cc260
-│       │   │   ├── physics-core-4ce9a5b60ee38aba
-│       │   │   ├── physics-core-7961c1db14816654
-│       │   │   ├── proc-macro2-474ea62bb60cfaec
-│       │   │   ├── proc-macro2-a13c6a8819d72483
-│       │   │   ├── proc-macro2-b993d74968ad8b45
-│       │   │   ├── quote-860850d53eee16cd
-│       │   │   ├── quote-92f7a04ebc619dac
-│       │   │   ├── quote-a57c969215c35a65
-│       │   │   ├── rustversion-064bf7827f8c4a8d
-│       │   │   ├── rustversion-64e1fcc4a66d394c
-│       │   │   ├── rustversion-cf3eaf2abd86a894
-│       │   │   ├── syn-11cac20b18e3524c
-│       │   │   ├── unicode-ident-cc51832a5590305e
-│       │   │   ├── unicode-ident-ff24541d0273ed5a
-│       │   │   ├── wasm-bindgen-0a9309656cc8b0b6
-│       │   │   ├── wasm-bindgen-3aa15a52687d2c18
-│       │   │   ├── wasm-bindgen-8f2f0c4f82ac0c05
-│       │   │   ├── wasm-bindgen-macro-69047cd357bb408e
-│       │   │   ├── wasm-bindgen-macro-support-f8e142d2196b3c8a
-│       │   │   ├── wasm-bindgen-shared-35292429f3f269e3
-│       │   │   ├── wasm-bindgen-shared-77a591cdfdc41e6d
-│       │   │   ├── wasm-bindgen-shared-a5662831ae32c97a
-│       │   │   ├── wasm-bindgen-shared-ca68847e7ea4c663
-│       │   │   └── web-sys-c2574f69c99b4aad
-│       │   ├── deps
-│       │   │   ├── bumpalo-074e47f4800c60f5.d
-│       │   │   ├── cfg_if-eed30869daa6a03e.d
-│       │   │   ├── console_error_panic_hook-9b34c416e5da7bd7.d
-│       │   │   ├── js_sys-ecb6bc41bc5aeda2.d
-│       │   │   ├── libbumpalo-074e47f4800c60f5.rlib
-│       │   │   ├── libbumpalo-074e47f4800c60f5.rmeta
-│       │   │   ├── libcfg_if-eed30869daa6a03e.rmeta
-│       │   │   ├── libconsole_error_panic_hook-9b34c416e5da7bd7.rmeta
-│       │   │   ├── libjs_sys-ecb6bc41bc5aeda2.rmeta
-│       │   │   ├── libonce_cell-fa1b64d685be538f.rmeta
-│       │   │   ├── libphysics_core-0c87ee94897addce.rmeta
-│       │   │   ├── libphysics_core-1e359c2f0f8cc260.rmeta
-│       │   │   ├── libphysics_core-4ce9a5b60ee38aba.rmeta
-│       │   │   ├── libphysics_core-7961c1db14816654.rmeta
-│       │   │   ├── libproc_macro2-474ea62bb60cfaec.rlib
-│       │   │   ├── libproc_macro2-474ea62bb60cfaec.rmeta
-│       │   │   ├── libquote-a57c969215c35a65.rlib
-│       │   │   ├── libquote-a57c969215c35a65.rmeta
-│       │   │   ├── librustversion-064bf7827f8c4a8d.dylib
-│       │   │   ├── libsyn-11cac20b18e3524c.rlib
-│       │   │   ├── libsyn-11cac20b18e3524c.rmeta
-│       │   │   ├── libunicode_ident-cc51832a5590305e.rmeta
-│       │   │   ├── libunicode_ident-ff24541d0273ed5a.rlib
-│       │   │   ├── libunicode_ident-ff24541d0273ed5a.rmeta
-│       │   │   ├── libwasm_bindgen-8f2f0c4f82ac0c05.rmeta
-│       │   │   ├── libwasm_bindgen_macro-69047cd357bb408e.dylib
-│       │   │   ├── libwasm_bindgen_macro_support-f8e142d2196b3c8a.rlib
-│       │   │   ├── libwasm_bindgen_macro_support-f8e142d2196b3c8a.rmeta
-│       │   │   ├── libwasm_bindgen_shared-35292429f3f269e3.rmeta
-│       │   │   ├── libwasm_bindgen_shared-a5662831ae32c97a.rlib
-│       │   │   ├── libwasm_bindgen_shared-a5662831ae32c97a.rmeta
-│       │   │   ├── libweb_sys-c2574f69c99b4aad.rmeta
-│       │   │   ├── once_cell-fa1b64d685be538f.d
-│       │   │   ├── physics_core-0c87ee94897addce.d
-│       │   │   ├── physics_core-1e359c2f0f8cc260.d
-│       │   │   ├── physics_core-4ce9a5b60ee38aba.d
-│       │   │   ├── physics_core-7961c1db14816654.d
-│       │   │   ├── proc_macro2-474ea62bb60cfaec.d
-│       │   │   ├── quote-a57c969215c35a65.d
-│       │   │   ├── rustversion-064bf7827f8c4a8d.d
-│       │   │   ├── syn-11cac20b18e3524c.d
-│       │   │   ├── unicode_ident-cc51832a5590305e.d
-│       │   │   ├── unicode_ident-ff24541d0273ed5a.d
-│       │   │   ├── wasm_bindgen-8f2f0c4f82ac0c05.d
-│       │   │   ├── wasm_bindgen_macro-69047cd357bb408e.d
-│       │   │   ├── wasm_bindgen_macro_support-f8e142d2196b3c8a.d
-│       │   │   ├── wasm_bindgen_shared-35292429f3f269e3.d
-│       │   │   ├── wasm_bindgen_shared-a5662831ae32c97a.d
-│       │   │   └── web_sys-c2574f69c99b4aad.d
-│       │   ├── examples
-│       │   └── incremental
-│       │       ├── physics_core-0mxrwi92uaik6
-│       │       ├── physics_core-1lg2aam4vs49k
-│       │       ├── physics_core-33rm3swwpdipp
-│       │       └── physics_core-3v288ueh2coso
-│       ├── flycheck0
-│       │   ├── stderr
-│       │   └── stdout
-│       ├── release
-│       │   ├── .cargo-lock
-│       │   ├── .fingerprint
-│       │   │   ├── bumpalo-9f7625dc1479ace5
-│       │   │   ├── proc-macro2-68497fd3a796ea52
-│       │   │   ├── proc-macro2-8d7e3d07c6e8c19f
-│       │   │   ├── proc-macro2-c32dd1050b840c44
-│       │   │   ├── quote-1c75f18ed2aa6da7
-│       │   │   ├── quote-ae8b1d6b825f0f89
-│       │   │   ├── quote-f446735bf5da661f
-│       │   │   ├── rustversion-0420a36ec774df70
-│       │   │   ├── rustversion-8d5f7e75ceb2525e
-│       │   │   ├── rustversion-ae7c899c29221c01
-│       │   │   ├── syn-ce9bb3f0a59325fc
-│       │   │   ├── unicode-ident-a2e6278bca0e7d6f
-│       │   │   ├── wasm-bindgen-aaa689576b8d4aaf
-│       │   │   ├── wasm-bindgen-macro-a28f79257fd20ee1
-│       │   │   ├── wasm-bindgen-macro-support-4dc916866ad88f40
-│       │   │   ├── wasm-bindgen-shared-08ee2b20437c2d64
-│       │   │   ├── wasm-bindgen-shared-96643fee2e7eb3ce
-│       │   │   └── wasm-bindgen-shared-bc715c6fd9fece48
-│       │   ├── deps
-│       │   │   ├── bumpalo-9f7625dc1479ace5.d
-│       │   │   ├── libbumpalo-9f7625dc1479ace5.rlib
-│       │   │   ├── libbumpalo-9f7625dc1479ace5.rmeta
-│       │   │   ├── libproc_macro2-68497fd3a796ea52.rlib
-│       │   │   ├── libproc_macro2-68497fd3a796ea52.rmeta
-│       │   │   ├── libquote-ae8b1d6b825f0f89.rlib
-│       │   │   ├── libquote-ae8b1d6b825f0f89.rmeta
-│       │   │   ├── librustversion-8d5f7e75ceb2525e.dylib
-│       │   │   ├── libsyn-ce9bb3f0a59325fc.rlib
-│       │   │   ├── libsyn-ce9bb3f0a59325fc.rmeta
-│       │   │   ├── libunicode_ident-a2e6278bca0e7d6f.rlib
-│       │   │   ├── libunicode_ident-a2e6278bca0e7d6f.rmeta
-│       │   │   ├── libwasm_bindgen_macro-a28f79257fd20ee1.dylib
-│       │   │   ├── libwasm_bindgen_macro_support-4dc916866ad88f40.rlib
-│       │   │   ├── libwasm_bindgen_macro_support-4dc916866ad88f40.rmeta
-│       │   │   ├── libwasm_bindgen_shared-bc715c6fd9fece48.rlib
-│       │   │   ├── libwasm_bindgen_shared-bc715c6fd9fece48.rmeta
-│       │   │   ├── proc_macro2-68497fd3a796ea52.d
-│       │   │   ├── quote-ae8b1d6b825f0f89.d
-│       │   │   ├── rustversion-8d5f7e75ceb2525e.d
-│       │   │   ├── syn-ce9bb3f0a59325fc.d
-│       │   │   ├── unicode_ident-a2e6278bca0e7d6f.d
-│       │   │   ├── wasm_bindgen_macro-a28f79257fd20ee1.d
-│       │   │   ├── wasm_bindgen_macro_support-4dc916866ad88f40.d
-│       │   │   └── wasm_bindgen_shared-bc715c6fd9fece48.d
-│       │   ├── examples
-│       │   └── incremental
-│       └── wasm32-unknown-unknown
-│           ├── CACHEDIR.TAG
-│           └── release
-│               ├── .cargo-lock
-│               ├── .fingerprint
-│               ├── deps
-│               ├── examples
-│               ├── incremental
-│               ├── libphysics_core.d
-│               ├── libphysics_core.rlib
-│               ├── physics_core.d
-│               └── physics_core.wasm
+│   └── src
+│       ├── collider
+│       │   ├── mod.rs
+│       │   ├── sdf.rs
+│       │   └── spatial_hash.rs
+│       ├── constraints
+│       │   ├── bending.rs
+│       │   ├── distance.rs
+│       │   ├── mod.rs
+│       │   ├── mouse.rs
+│       │   └── tether.rs
+│       ├── data.rs
+│       ├── lib.rs
+│       └── utils.rs
 ├── project-structure.txt
 ├── public
-│   ├── .DS_Store
 │   ├── mannequin.glb
 │   ├── shirt_proxy.glb
 │   ├── shirt_visual.glb
 │   └── vite.svg
 ├── src
-│   ├── .DS_Store
 │   ├── App.css
 │   ├── App.tsx
 │   ├── archives
@@ -272,7 +107,8 @@
 │   ├── main.tsx
 │   └── v4
 │       ├── adapter
-│       │   └── Bridge.ts
+│       │   ├── Bridge.ts
+│       │   └── useInteraction.ts
 │       ├── components
 │       │   ├── GarmentV4.tsx
 │       │   └── SDFVisualizer.tsx
@@ -284,4 +120,4 @@
 ├── tsconfig.node.json
 └── vite.config.ts
 
-120 directories, 165 files
+48 directories, 73 files

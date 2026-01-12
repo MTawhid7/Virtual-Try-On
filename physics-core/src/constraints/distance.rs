@@ -60,7 +60,7 @@ impl DistanceConstraint {
     }
 
     pub fn solve(&self, data: &mut PhysicsData, dt: f32) {
-        let compliance = 0.0000001; // Back to stiff for testing
+        let compliance = 0.000001; 
         let alpha = compliance / (dt * dt);
 
         for i in 0..self.rest_lengths.len() {

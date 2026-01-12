@@ -7,6 +7,7 @@ import * as BufferGeometryUtils from 'three/examples/jsm/utils/BufferGeometryUti
 import { Bridge } from '../adapter/Bridge';
 import { SDFVisualizer } from './SDFVisualizer';
 import { computeSkinning, type SkinningData } from '../utils/skinning';
+import { useInteraction } from '../adapter/useInteraction';
 
 export const GarmentV4 = () => {
     const proxyGLTF = useGLTF('/shirt_proxy.glb');
@@ -15,7 +16,6 @@ export const GarmentV4 = () => {
     const bridgeRef = useRef<Bridge>(new Bridge());
     const visualRef = useRef<THREE.Mesh | null>(null);
 
-    // State to ensure React renders the mesh only when geometry is ready
     const [visualGeometry, setVisualGeometry] = useState<THREE.BufferGeometry | null>(null);
     const [ready, setReady] = useState(false);
 
@@ -27,29 +27,19 @@ export const GarmentV4 = () => {
         const visualMesh = visualGLTF.scene.getObjectByProperty('isMesh', true) as THREE.Mesh | undefined;
 
         if (proxyMesh && visualMesh) {
-            // 1. Prepare Physics Mesh (WELDING IS CRITICAL)
             const rawProxyGeo = proxyMesh.geometry.clone();
-            // Delete attributes we don't need for physics to save memory/confusion
             rawProxyGeo.deleteAttribute('normal');
             rawProxyGeo.deleteAttribute('uv');
 
-            // Merge vertices to create a connected cloth simulation mesh
             const weldedProxyGeo = BufferGeometryUtils.mergeVertices(rawProxyGeo, 0.001);
             console.log(`[Garment] Welded Proxy: ${rawProxyGeo.attributes.position.count} -> ${weldedProxyGeo.attributes.position.count} verts`);
 
-            // 2. Prepare Visual Mesh
             const visualGeo = visualMesh.geometry.clone();
 
-            // 3. Init Physics with WELDED mesh
             bridgeRef.current.init(weldedProxyGeo).then(() => {
-
-                // 4. Compute Skinning (Visual -> WELDED Proxy)
-                // Now indices will match the physics engine perfectly
                 skinningRef.current = computeSkinning(visualGeo, weldedProxyGeo);
-
                 physicsGeoRef.current = weldedProxyGeo;
 
-                // 5. Update State to trigger render
                 setVisualGeometry(visualGeo);
                 setReady(true);
             });
@@ -73,7 +63,6 @@ export const GarmentV4 = () => {
         const pB = new THREE.Vector3();
         const pC = new THREE.Vector3();
 
-        // Skinning Loop
         for (let i = 0; i < visualPos.count; i++) {
             const faceIdx = indices[i];
             const w1 = weights[i * 3];
@@ -84,7 +73,6 @@ export const GarmentV4 = () => {
             const idxB = physicsIndex.getX(faceIdx * 3 + 1) * 3;
             const idxC = physicsIndex.getX(faceIdx * 3 + 2) * 3;
 
-            // Safety check for bounds
             if (idxA >= physicsPos.length || idxB >= physicsPos.length || idxC >= physicsPos.length) continue;
 
             pA.set(physicsPos[idxA], physicsPos[idxA + 1], physicsPos[idxA + 2]);
@@ -100,17 +88,29 @@ export const GarmentV4 = () => {
 
         visualPos.needsUpdate = true;
         visualGeo.computeVertexNormals();
+
+        // --- FIX: Update Bounding Sphere for Raycasting ---
+        // Without this, the raycaster thinks the shirt is still at the origin,
+        // so clicks on the moving shirt are ignored.
+        visualGeo.computeBoundingSphere();
     });
+
+    useInteraction(bridgeRef.current, visualRef);
 
     if (!visualGeometry) return null;
 
     return (
         <group>
             <mesh ref={visualRef} geometry={visualGeometry}>
-                <meshStandardMaterial
+                {/* UPGRADE: MeshPhysicalMaterial for cloth realism */}
+                <meshPhysicalMaterial
                     color="#4488ff"
                     side={THREE.DoubleSide}
-                    roughness={0.5}
+                    roughness={0.7}       // Fabric is rough
+                    clearcoat={0.0}       // No plastic shine
+                    sheen={1.0}           // Fabric sheen (velvet/cotton effect)
+                    sheenColor="#ffffff"
+                    thickness={0.01}      // Subsurface scattering hint
                 />
             </mesh>
 

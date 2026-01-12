@@ -1,15 +1,17 @@
 // physics-core/src/lib.rs
 pub mod utils;
-pub mod data;        // <--- Changed to pub mod
-pub mod constraints; // <--- Changed to pub mod
-pub mod collider;    // <--- Changed to pub mod
+pub mod data;
+pub mod constraints;
+pub mod collider;
 
 use wasm_bindgen::prelude::*;
 use data::PhysicsData;
 use constraints::distance::DistanceConstraint;
 use constraints::bending::BendingConstraint;
 use constraints::tether::TetherConstraint;
+use constraints::mouse::MouseConstraint;
 use collider::sdf::SDFCollider;
+use collider::spatial_hash::SpatialHash;
 
 #[wasm_bindgen]
 pub fn init_hooks() {
@@ -22,7 +24,9 @@ pub struct Simulation {
     distance_constraint: DistanceConstraint,
     bending_constraint: BendingConstraint,
     tether_constraint: Option<TetherConstraint>,
+    mouse_constraint: MouseConstraint,
     sdf_collider: SDFCollider,
+    spatial_hash: SpatialHash,
 }
 
 #[wasm_bindgen]
@@ -32,15 +36,35 @@ impl Simulation {
         let data = PhysicsData::new(positions, indices);
         let distance_constraint = DistanceConstraint::new(&data);
         let bending_constraint = BendingConstraint::new(&data);
+        let mouse_constraint = MouseConstraint::new();
         let sdf_collider = SDFCollider::new();
+        // Init Spatial Hash (Cell size 2cm)
+        let spatial_hash = SpatialHash::new(data.count, 0.02);
 
         Simulation {
             data,
             distance_constraint,
             bending_constraint,
             tether_constraint: None,
+            mouse_constraint,
             sdf_collider,
+            spatial_hash,
         }
+    }
+
+    // --- INTERACTION API ---
+    pub fn grab_particle(&mut self, index: usize, x: f32, y: f32, z: f32) {
+        // TUNING: 5cm Grab Radius
+        let radius = 0.05;
+        self.mouse_constraint.grab(&self.data, index, x, y, z, radius);
+    }
+
+    pub fn move_grab(&mut self, x: f32, y: f32, z: f32) {
+        self.mouse_constraint.update_target(x, y, z);
+    }
+
+    pub fn release_grab(&mut self) {
+        self.mouse_constraint.release();
     }
 
     // NEW: Pin vertices near the top to act like a hanger
@@ -73,7 +97,7 @@ impl Simulation {
 
     pub fn step(&mut self, dt: f32) {
         let gravity = -9.81;
-        let drag = 0.98;
+        let drag = 0.95;
         let substeps = 25;
         let sdt = dt / substeps as f32;
 
@@ -118,8 +142,15 @@ impl Simulation {
                 tether.solve(&mut self.data);
             }
 
+            // Solve Mouse BEFORE Collision (so you can pull it out of body)
+            self.mouse_constraint.solve(&mut self.data, sdt);
+
             // 3. Solve Collision
             self.sdf_collider.solve(&mut self.data, sdt);
+
+            // 4. Solve Self-Collision (Expensive, maybe run every other step?)
+            // For now, run every step for quality.
+            self.spatial_hash.solve(&mut self.data);
         }
     }
 

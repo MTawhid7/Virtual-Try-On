@@ -1,6 +1,7 @@
 // src/v4/adapter/Bridge.ts
 import init, { Simulation, init_hooks } from '../../../physics-core/pkg/physics_core';
 import * as THREE from 'three';
+import type { SkinningData } from '../utils/skinning'; // Import type
 
 let wasmInitPromise: Promise<WebAssembly.Memory> | null = null;
 
@@ -21,9 +22,6 @@ export class Bridge {
         }
         this.memory = await wasmInitPromise;
 
-        // --- CHANGE: REMOVED WELDING ---
-        // The geometry passed here must ALREADY be welded.
-
         const posAttr = geometry.attributes.position;
         const vertexArray = new Float32Array(posAttr.array);
 
@@ -35,7 +33,6 @@ export class Bridge {
 
         this.sim = new Simulation(vertexArray, indexArray);
 
-        // Pinning & Tethers
         this.sim.pin_collar(0.05);
         this.sim.init_tethers();
 
@@ -58,5 +55,49 @@ export class Bridge {
     getSDFConfig(): number[] | null {
         if (!this.sim) return null;
         return Array.from(this.sim.get_sdf_config());
+    }
+
+    // Interaction Helpers
+    public startInteraction(index: number, x: number, y: number, z: number) {
+        if (this.sim) this.sim.grab_particle(index, x, y, z);
+    }
+
+    public updateInteraction(x: number, y: number, z: number) {
+        if (this.sim) this.sim.move_grab(x, y, z);
+    }
+
+    public endInteraction() {
+        if (this.sim) this.sim.release_grab();
+    }
+
+    // Unused params removed to fix lint errors
+    public getPhysicsParticleIndex(_visualFaceIndex: number, _skinning: SkinningData, _physicsIndex: THREE.BufferAttribute): number {
+        return -1;
+    }
+
+    public findNearestParticle(point: THREE.Vector3): number {
+        if (!this.positions) return -1;
+
+        let minDist = Infinity;
+        let bestIdx = -1;
+
+        for (let i = 0; i < this.positions.length / 3; i++) {
+            const x = this.positions[i * 3];
+            const y = this.positions[i * 3 + 1];
+            const z = this.positions[i * 3 + 2];
+
+            const dx = x - point.x;
+            const dy = y - point.y;
+            const dz = z - point.z;
+            const d2 = dx * dx + dy * dy + dz * dz;
+
+            if (d2 < minDist) {
+                minDist = d2;
+                bestIdx = i;
+            }
+        }
+
+        if (minDist > 0.01) return -1;
+        return bestIdx;
     }
 }
