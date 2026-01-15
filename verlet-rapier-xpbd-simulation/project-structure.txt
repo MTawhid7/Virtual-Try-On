@@ -1,0 +1,123 @@
+.
+├── .gitignore
+├── FUTURE_PLAN.md
+├── README.md
+├── eslint.config.js
+├── index.html
+├── package-lock.json
+├── package.json
+├── physics-core
+│   ├── Cargo.lock
+│   ├── Cargo.toml
+│   └── src
+│       ├── collider
+│       │   ├── mod.rs
+│       │   ├── sdf.rs
+│       │   └── spatial_hash.rs
+│       ├── constraints
+│       │   ├── bending.rs
+│       │   ├── distance.rs
+│       │   ├── mod.rs
+│       │   ├── mouse.rs
+│       │   └── tether.rs
+│       ├── data.rs
+│       ├── lib.rs
+│       └── utils.rs
+├── project-structure.txt
+├── public
+│   ├── mannequin.glb
+│   ├── shirt_proxy.glb
+│   ├── shirt_visual.glb
+│   └── vite.svg
+├── src
+│   ├── App.css
+│   ├── App.tsx
+│   ├── archives
+│   │   ├── v1_verlet
+│   │   │   ├── application
+│   │   │   │   └── Viewer.tsx
+│   │   │   ├── infrastructure
+│   │   │   │   ├── PerformanceMonitor.ts
+│   │   │   │   └── config.ts
+│   │   │   ├── presentation
+│   │   │   │   ├── AssetManager.ts
+│   │   │   │   ├── BodyManager.ts
+│   │   │   │   ├── InteractionController.ts
+│   │   │   │   ├── SceneManager.ts
+│   │   │   │   ├── factories
+│   │   │   │   └── systems
+│   │   │   ├── simulation
+│   │   │   │   ├── IPhysicsEngine.ts
+│   │   │   │   ├── PhysicsState.ts
+│   │   │   │   ├── VerletPhysicsEngine.ts
+│   │   │   │   ├── forces
+│   │   │   │   ├── solvers
+│   │   │   │   ├── types.ts
+│   │   │   │   └── utils
+│   │   │   └── types
+│   │   │       └── index.ts
+│   │   ├── v2_rapier
+│   │   │   ├── AppV2.tsx
+│   │   │   ├── components
+│   │   │   │   ├── avatar
+│   │   │   │   ├── canvas
+│   │   │   │   ├── debug
+│   │   │   │   ├── garment
+│   │   │   │   └── ui
+│   │   │   ├── config
+│   │   │   │   ├── debug.config.ts
+│   │   │   │   └── physics.config.ts
+│   │   │   ├── hooks
+│   │   │   │   ├── useGarmentInteraction.ts
+│   │   │   │   ├── useGarmentLoader.ts
+│   │   │   │   ├── useGarmentPhysics.ts
+│   │   │   │   ├── usePhysicsDebug.ts
+│   │   │   │   └── useSettlingForce.ts
+│   │   │   ├── types
+│   │   │   │   ├── garment.types.ts
+│   │   │   │   └── physics.types.ts
+│   │   │   └── utils
+│   │   │       ├── geometry.ts
+│   │   │       ├── materials.ts
+│   │   │       ├── skinning.ts
+│   │   │       └── validation.ts
+│   │   └── v3_xpbd
+│   │       ├── AppV3.tsx
+│   │       ├── adapter
+│   │       │   ├── useClothEngine.ts
+│   │       │   └── useInteraction.ts
+│   │       ├── engine
+│   │       │   ├── MannequinCollider.ts
+│   │       │   ├── constraints
+│   │       │   ├── core
+│   │       │   └── utils
+│   │       ├── presentation
+│   │       │   ├── SceneV3.tsx
+│   │       │   ├── components
+│   │       │   └── ui
+│   │       ├── shared
+│   │       │   ├── constants.ts
+│   │       │   └── types.ts
+│   │       └── utils
+│   │           └── skinning.ts
+│   ├── assets
+│   │   ├── models
+│   │   └── react.svg
+│   ├── index.css
+│   ├── main.tsx
+│   └── v4
+│       ├── adapter
+│       │   ├── Bridge.ts
+│       │   └── useInteraction.ts
+│       ├── components
+│       │   ├── GarmentV4.tsx
+│       │   └── SDFVisualizer.tsx
+│       ├── types
+│       └── utils
+│           └── skinning.ts
+├── tsconfig.app.json
+├── tsconfig.json
+├── tsconfig.node.json
+└── vite.config.ts
+
+48 directories, 73 files
