@@ -1,0 +1,23 @@
+# Python
+__pycache__/
+*.pyc
+
+# Virtual Environment
+.venv/
+venv/
+env/
+
+# IDE settings
+.vscode/
+.idea/
+
+# Mac OS
+.DS_Store
+
+# Project Assets (Generated output)
+# We ignore the logs and generated XMLs so every run doesn't create a code change.
+assets/*.xml
+assets/*.csv
+
+# Keep the assets folder itself, just ignore the content
+!assets/.gitkeep
