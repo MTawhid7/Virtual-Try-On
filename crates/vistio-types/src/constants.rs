@@ -7,7 +7,7 @@ pub const GRAVITY: f32 = 9.81;
 pub const DEFAULT_DT: f32 = 1.0 / 60.0;
 
 /// Default number of PD iterations per timestep.
-pub const DEFAULT_PD_ITERATIONS: u32 = 15;
+pub const DEFAULT_PD_ITERATIONS: u32 = 10;
 
 /// Default contact thickness (meters). Minimum separation between surfaces.
 pub const DEFAULT_CONTACT_THICKNESS: f32 = 0.005;

@@ -87,7 +87,7 @@ impl SelfCollisionSystem {
         broad: &mut dyn BroadPhase,
     ) -> SelfCollisionResult {
         // Phase 1: Broad phase — get candidate vertex pairs
-        broad.update(state, self.thickness).ok();
+        broad.update(&state.pos_x, &state.pos_y, &state.pos_z, self.thickness).ok();
         let candidates = broad.query_pairs();
         let candidate_count = candidates.len() as u32;
 
@@ -189,6 +189,90 @@ impl SelfCollisionSystem {
         }
 
         corrections
+    }
+
+    /// Detect self-collision contacts and compute IPC barrier gradients.
+    ///
+    /// This is the Tier 4 IPC step which does not modify positions directly,
+    /// but instead builds an `IpcContactSet` which is returned to the solver.
+    #[allow(clippy::too_many_arguments)]
+    pub fn detect_ipc_contacts(
+        &self,
+        broad_phase: &mut dyn crate::broad::BroadPhase,
+        pos_x: &[f32],
+        pos_y: &[f32],
+        pos_z: &[f32],
+        thickness: f32,
+        d_hat: f32,
+        kappa: f32,
+    ) -> crate::ipc_response::IpcContactSet {
+        // Update broad phase with current slices
+        broad_phase.update(pos_x, pos_y, pos_z, thickness).ok();
+
+        let mut ipc_set = crate::ipc_response::IpcContactSet::new(d_hat, kappa);
+
+        // We use triangle pairs from the BVH because IPC needs both
+        // vertex-triangle and edge-edge contacts for robustness.
+        let tri_pairs = broad_phase.query_triangle_pairs();
+
+        for pair in tri_pairs {
+            let [a0, a1, a2] = self.triangles[pair.ta as usize];
+            let [b0, b1, b2] = self.triangles[pair.tb as usize];
+            let a_verts = [a0 as usize, a1 as usize, a2 as usize];
+            let b_verts = [b0 as usize, b1 as usize, b2 as usize];
+
+            // 1. Point-Triangle tests
+            // Vertices of A vs Triangle B
+            for &va in &a_verts {
+                if b_verts.contains(&va) { continue; }
+                if self.exclusion.should_exclude(va, b_verts[0])
+                    || self.exclusion.should_exclude(va, b_verts[1])
+                    || self.exclusion.should_exclude(va, b_verts[2])
+                { continue; }
+                ipc_set.detect_vertex_triangle(va, b_verts[0], b_verts[1], b_verts[2], pos_x, pos_y, pos_z, true);
+            }
+
+            // Vertices of B vs Triangle A
+            for &vb in &b_verts {
+                if a_verts.contains(&vb) { continue; }
+                if self.exclusion.should_exclude(vb, a_verts[0])
+                    || self.exclusion.should_exclude(vb, a_verts[1])
+                    || self.exclusion.should_exclude(vb, a_verts[2])
+                { continue; }
+                ipc_set.detect_vertex_triangle(vb, a_verts[0], a_verts[1], a_verts[2], pos_x, pos_y, pos_z, true);
+            }
+
+            // 2. Edge-Edge tests
+            let a_edges = [(a0, a1), (a1, a2), (a2, a0)];
+            let b_edges = [(b0, b1), (b1, b2), (b2, b0)];
+
+            for &(ea0, ea1) in &a_edges {
+                let ea0 = ea0 as usize;
+                let ea1 = ea1 as usize;
+                for &(eb0, eb1) in &b_edges {
+                    let eb0 = eb0 as usize;
+                    let eb1 = eb1 as usize;
+
+                    // Skip if they share a vertex
+                    if ea0 == eb0 || ea0 == eb1 || ea1 == eb0 || ea1 == eb1 {
+                        continue;
+                    }
+
+                    // Skip if topologically close
+                    if self.exclusion.should_exclude(ea0, eb0)
+                        && self.exclusion.should_exclude(ea0, eb1)
+                        && self.exclusion.should_exclude(ea1, eb0)
+                        && self.exclusion.should_exclude(ea1, eb1)
+                    {
+                        continue;
+                    }
+
+                    ipc_set.detect_edge_edge(ea0, ea1, eb0, eb1, pos_x, pos_y, pos_z, true);
+                }
+            }
+        }
+
+        ipc_set
     }
 }
 

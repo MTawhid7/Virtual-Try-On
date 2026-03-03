@@ -4,7 +4,6 @@
 //! acceleration structures. The narrow phase then refines these
 //! candidates into actual contacts.
 
-use vistio_solver::SimulationState;
 use vistio_types::VistioResult;
 
 /// Candidate pair from broad phase (indices into vertex/triangle arrays).
@@ -14,6 +13,17 @@ pub struct CandidatePair {
     pub a: u32,
     /// Second primitive index.
     pub b: u32,
+    /// Whether both primitives belong to the same mesh (self-collision).
+    pub is_self: bool,
+}
+
+/// Candidate pair of triangles from broad phase (typically BVH).
+#[derive(Debug, Clone, Copy)]
+pub struct CandidateTrianglePair {
+    /// First triangle index.
+    pub ta: u32,
+    /// Second triangle index.
+    pub tb: u32,
     /// Whether both primitives belong to the same mesh (self-collision).
     pub is_self: bool,
 }
@@ -28,12 +38,18 @@ pub struct CandidatePair {
 /// - `BvhBroadPhase` — Bounding volume hierarchy (Tier 2, good for cloth-body)
 pub trait BroadPhase: Send {
     /// Build or update the acceleration structure from current positions.
-    fn update(&mut self, state: &SimulationState, thickness: f32) -> VistioResult<()>;
+    fn update(&mut self, pos_x: &[f32], pos_y: &[f32], pos_z: &[f32], thickness: f32) -> VistioResult<()>;
 
     /// Query candidate collision pairs.
     ///
     /// Returns all pairs where the bounding volumes overlap.
     fn query_pairs(&self) -> Vec<CandidatePair>;
+
+    /// Query candidate triangle collision pairs.
+    /// Useful for IPC which needs both vertex-triangle and edge-edge contacts.
+    fn query_triangle_pairs(&self) -> Vec<CandidateTrianglePair> {
+        Vec::new() // Default empty implementation
+    }
 
     /// Returns the broad phase strategy name.
     fn name(&self) -> &str;
@@ -43,7 +59,7 @@ pub trait BroadPhase: Send {
 pub struct NullBroadPhase;
 
 impl BroadPhase for NullBroadPhase {
-    fn update(&mut self, _state: &SimulationState, _thickness: f32) -> VistioResult<()> {
+    fn update(&mut self, _pos_x: &[f32], _pos_y: &[f32], _pos_z: &[f32], _thickness: f32) -> VistioResult<()> {
         Ok(())
     }
 

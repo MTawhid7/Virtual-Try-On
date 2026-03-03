@@ -28,7 +28,7 @@ impl TopologyExclusion {
         let n = mesh.vertex_count();
         let mut excluded: Vec<HashSet<u32>> = vec![HashSet::new(); n];
 
-        for v in 0..n {
+        for (v, current_exclusion) in excluded.iter_mut().enumerate() {
             let mut current: HashSet<u32> = HashSet::new();
             current.insert(v as u32);
 
@@ -41,7 +41,7 @@ impl TopologyExclusion {
                 current = next;
             }
 
-            excluded[v] = current;
+            *current_exclusion = current;
         }
 
         Self { excluded }

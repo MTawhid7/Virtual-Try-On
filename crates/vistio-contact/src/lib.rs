@@ -15,12 +15,17 @@
 //! The [`CollisionPipeline`] orchestrates all three phases and optional
 //! ground plane collision into a single `step()` call.
 
+pub mod barrier;
 pub mod broad;
+pub mod bvh;
+pub mod ccd;
 pub mod collision_pipeline;
 pub mod coloring;
 pub mod contact;
+pub mod distance_primitives;
 pub mod exclusion;
 pub mod ground_plane;
+pub mod ipc_response;
 pub mod narrow;
 pub mod projection;
 pub mod response;
@@ -32,11 +37,13 @@ pub mod box_collider;
 pub mod vertex_triangle;
 
 pub use broad::BroadPhase;
+pub use bvh::BvhBroadPhase;
 pub use collision_pipeline::CollisionPipeline;
 pub use coloring::CollisionColoring;
 pub use contact::{ContactPair, ContactType};
 pub use exclusion::TopologyExclusion;
 pub use ground_plane::GroundPlane;
+pub use ipc_response::IpcContactSet;
 pub use narrow::NarrowPhase;
 pub use projection::ProjectionContactResponse;
 pub use response::ContactResponse;
@@ -46,3 +53,6 @@ pub use sphere::SphereCollider;
 pub use cylinder::CylinderCollider;
 pub use box_collider::BoxCollider;
 pub use vertex_triangle::VertexTriangleTest;
+
+#[cfg(test)]
+mod tests;

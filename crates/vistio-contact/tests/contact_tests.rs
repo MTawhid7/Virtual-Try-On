@@ -62,7 +62,7 @@ fn null_broad_phase_returns_empty() {
     let state = SimulationState::from_mesh(&mesh, 0.01, &pinned).unwrap();
 
     let mut bp = NullBroadPhase;
-    bp.update(&state, 0.001).unwrap();
+    bp.update(&state.pos_x, &state.pos_y, &state.pos_z, 0.001).unwrap();
     assert!(bp.query_pairs().is_empty());
     assert_eq!(bp.name(), "null_broad_phase");
 }
@@ -106,7 +106,7 @@ fn spatial_hash_finds_nearby_vertices() {
     let state = SimulationState::from_mesh(&mesh, 0.01, &pinned).unwrap();
 
     let mut hash = SpatialHash::new(0.15); // Cell size > spacing
-    hash.update(&state, 0.01).unwrap();
+    hash.update(&state.pos_x, &state.pos_y, &state.pos_z, 0.01).unwrap();
 
     let pairs = hash.query_pairs();
     // With a small mesh and large cells, should find candidate pairs
@@ -125,7 +125,7 @@ fn spatial_hash_distant_vertices_no_pairs() {
     let state = SimulationState::from_mesh(&mesh, 0.01, &pinned).unwrap();
 
     let mut hash = SpatialHash::new(1.0); // Small cell size vs spacing
-    hash.update(&state, 0.01).unwrap();
+    hash.update(&state.pos_x, &state.pos_y, &state.pos_z, 0.01).unwrap();
 
     let pairs = hash.query_pairs();
     // With huge spacing and small cells, no vertex shares a cell or neighbors

@@ -2,7 +2,7 @@
 //!
 //! Provides a physically based rendering environment for Vistio cloth simulations.
 
-use std::time::Instant;
+
 
 use bevy::prelude::*;
 use bevy::render::mesh::Indices;
@@ -26,6 +26,13 @@ struct SimRunner {
     current_step: u32,
     indices: Vec<u32>, // Flat array of [i0, i1, i2, ...]
     collision: Option<CollisionPipeline>,
+    config: vistio_solver::config::SolverConfig,
+    mesh: vistio_mesh::TriangleMesh,
+    /// Pre-computed barrier stiffness (computed once at init, not every frame)
+    kappa: f32,
+    /// Accumulated wall-clock time for fixed-timestep accumulation.
+    /// Ensures deterministic step count regardless of frame rate.
+    accumulated_time: f32,
 }
 
 #[derive(Resource)]
@@ -79,20 +86,33 @@ pub fn launch_viewer(scenario: Scenario) -> Result<(), Box<dyn std::error::Error
         scenario.vertex_mass
     };
 
-    let mut state = SimulationState::from_mesh(
+    let mut state = SimulationState::from_mesh_with_masses(
         &scenario.garment,
-        vertex_mass,
+        solver.lumped_masses(),
         &scenario.pinned,
     ).map_err(|e| format!("State init failed: {e}"))?;
 
+    let is_ipc = scenario.config.ipc_enabled;
+    let broad_phase: Box<dyn vistio_contact::broad::BroadPhase + Send + Sync> = if is_ipc {
+        Box::new(vistio_contact::bvh::BvhBroadPhase::new(&scenario.garment))
+    } else {
+        Box::new(SpatialHash::new(0.05))
+    };
+
+    let thickness = if is_ipc { scenario.config.barrier_d_hat * 1.5 } else { 0.0 };
+
     let mut pipeline = CollisionPipeline::new(
-        Box::new(SpatialHash::new(0.05)),
+        broad_phase,
         Box::new(VertexTriangleTest),
         Box::new(ProjectionContactResponse),
         scenario.garment.clone(),
-        0.0,
+        thickness,
         0.0,
     );
+
+    if is_ipc {
+        pipeline = pipeline.with_self_collision(&topology, 1).with_ipc(true);
+    }
 
     let ground_height: f32;
     match scenario.kind {
@@ -109,12 +129,10 @@ pub fn launch_viewer(scenario: Scenario) -> Result<(), Box<dyn std::error::Error
                 .with_cylinder(0.0, 0.0, 0.3, 0.09); // Base at y=-0.3, radius 0.09m, height 0.6m (top at y=0.3)
         },
         vistio_bench::scenarios::ScenarioKind::CantileverBending => {
-            ground_height = 0.5; // Ledge top
+            ground_height = 0.0; // Floor at y=0.0
             pipeline = pipeline
-                .with_ground(-0.5) // Real ground
-                .with_box(
-                    -0.25, 0.0, 0.0, 0.5, -0.25, 0.25
-                );
+                .with_ground(0.0)
+                .with_box(-0.1, 0.1, 0.0, 0.499, -0.2, 0.0);
         },
         _ => {
             ground_height = -0.3;
@@ -125,6 +143,14 @@ pub fn launch_viewer(scenario: Scenario) -> Result<(), Box<dyn std::error::Error
     // Wire ground height into the solver's internal constraint enforcement
     state.ground_height = Some(ground_height);
 
+    // Pre-compute kappa once at init
+    let kappa = vistio_contact::barrier::estimate_initial_kappa(
+        scenario.config.barrier_kappa,
+        vertex_mass,
+        scenario.config.gravity[1].abs(),
+        scenario.config.barrier_d_hat,
+    );
+
     let runner = SimRunner {
         solver,
         state,
@@ -132,6 +158,10 @@ pub fn launch_viewer(scenario: Scenario) -> Result<(), Box<dyn std::error::Error
         current_step: 0,
         indices: scenario.garment.indices.clone(),
         collision: Some(pipeline),
+        config: scenario.config.clone(),
+        mesh: scenario.garment.clone(),
+        kappa,
+        accumulated_time: 0.0,
     };
 
     let scene_data = SceneData {
@@ -217,14 +247,41 @@ fn compute_smooth_normals(
     normals
 }
 
+struct ViewerIpcHandler<'a> {
+    pipeline: &'a mut CollisionPipeline,
+    d_hat: f32,
+    kappa: f32,
+    mesh: &'a vistio_mesh::TriangleMesh,
+}
+
+impl<'a> vistio_solver::pd_solver::IpcCollisionHandler for ViewerIpcHandler<'a> {
+    fn detect_contacts(&mut self, px: &[f32], py: &[f32], pz: &[f32]) -> vistio_solver::pd_solver::IpcBarrierForces {
+        self.pipeline.detect_ipc_contacts(px, py, pz, self.d_hat, self.kappa)
+    }
+
+    fn compute_ccd_step(&mut self, prev_x: &[f32], prev_y: &[f32], prev_z: &[f32], new_x: &[f32], new_y: &[f32], new_z: &[f32]) -> f32 {
+        self.pipeline.compute_ccd_step(&self.mesh.indices, prev_x, prev_y, prev_z, new_x, new_y, new_z)
+    }
+}
+
 fn simulate_cloth(
     mut runner: ResMut<SimRunner>,
     scene_data: Res<SceneData>,
+    time: Res<Time>,
     mut meshes: ResMut<Assets<Mesh>>,
     query: Query<(Entity, &Handle<Mesh>), With<ClothMesh>>,
 ) {
-    let _start = Instant::now();
     let dt = runner.dt;
+
+    // Fixed-timestep accumulation: run physics steps at a fixed rate
+    // regardless of Bevy's variable frame rate. This ensures determinism.
+    runner.accumulated_time += time.delta_seconds();
+    let max_steps_per_frame = 3; // Cap to prevent spiral of death
+    let mut steps_this_frame = 0;
+
+    while runner.accumulated_time >= dt && steps_this_frame < max_steps_per_frame {
+        runner.accumulated_time -= dt;
+        steps_this_frame += 1;
 
     if scene_data.scenario_kind == vistio_bench::scenarios::ScenarioKind::UniaxialStretch {
         // Stop pulling after 120 frames to hit exactly 50% strain without infinite tearing
@@ -240,21 +297,58 @@ fn simulate_cloth(
     }
 
     // Borrow parts independently
-    let SimRunner { ref mut solver, ref mut state, ref mut collision, .. } = *runner;
+    let SimRunner { ref mut solver, ref mut state, ref mut collision, ref config, ref mesh, kappa, .. } = *runner;
 
-    let _result = match solver.step(state, dt) {
-        Ok(res) => res,
-        Err(e) => {
-            eprintln!("Simulation error: {}", e);
-            return;
+    let _result = if config.ipc_enabled {
+        if let Some(ref mut pipeline) = collision {
+            let mut handler = ViewerIpcHandler {
+                pipeline,
+                d_hat: config.barrier_d_hat,
+                kappa,
+                mesh,
+            };
+            match solver.step_with_ipc(state, dt, &mut handler) {
+                Ok(res) => res,
+                Err(e) => {
+                    eprintln!("Simulation error: {}", e);
+                    return;
+                }
+            }
+        } else {
+            let mut empty_handler = vistio_solver::pd_solver::EmptyIpcHandler;
+            match solver.step_with_ipc(state, dt, &mut empty_handler) {
+                Ok(res) => res,
+                Err(e) => {
+                    eprintln!("Simulation error: {}", e);
+                    return;
+                }
+            }
+        }
+    } else {
+        match solver.step(state, dt) {
+            Ok(res) => res,
+            Err(e) => {
+                eprintln!("Simulation error: {}", e);
+                return;
+            }
         }
     };
 
+    // Post-solve: enforce analytical colliders as a safety net.
+    // We do NOT run the full pipeline.step() (which includes self-collision
+    // projection response), only the analytical sphere/ground projections
+    // that prevent penetration when barrier forces are too weak.
     if let Some(ref mut pipeline) = collision {
-        let _ = pipeline.step(state);
+        if let Some(ref sphere) = pipeline.sphere {
+            sphere.resolve(state);
+        }
+        if let Some(ref ground) = pipeline.ground {
+            ground.resolve(state);
+        }
     }
 
     runner.current_step += 1;
+    } // end fixed-timestep loop
 
     let n = runner.state.vertex_count;
     let mut positions = Vec::with_capacity(n);
@@ -412,12 +506,13 @@ fn setup_scene(
                 perceptual_roughness: 0.9,
                 ..default()
             });
-            // Box from (-0.25, 0.0, -0.25) to (0.0, 0.5, 0.25)
-            // Center: (-0.125, 0.25, 0.0), Size: (0.25, 0.5, 0.5)
+            // Box is min_x=-0.1, max_x=0.1, min_y=0.0, max_y=0.5, min_z=-0.2, max_z=0.0
+            // Size: (0.2, 0.5, 0.2)
+            // Center is (0.0, 0.25, -0.1)
             commands.spawn(PbrBundle {
-                mesh: meshes.add(Cuboid::new(0.25, 0.5, 0.5)),
+                mesh: meshes.add(Cuboid::new(0.2, 0.5, 0.2)),
                 material: ledge_material,
-                transform: Transform::from_xyz(-0.125, 0.25, 0.0),
+                transform: Transform::from_xyz(0.0, 0.25, -0.1),
                 ..default()
             });
         },

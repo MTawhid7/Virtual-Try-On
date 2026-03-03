@@ -102,4 +102,151 @@ impl BoxCollider {
             total_force_magnitude: tf,
         }
     }
+
+    /// Compute IPC barrier gradients for vertices near the box.
+    pub fn detect_ipc_contacts(
+        &self,
+        pos_x: &[f32],
+        pos_y: &[f32],
+        pos_z: &[f32],
+        d_hat: f32,
+        kappa: f32,
+        grad_x: &mut [f32],
+        grad_y: &mut [f32],
+        grad_z: &mut [f32],
+    ) -> (usize, f32) {
+        let mut active = 0;
+        let mut max_violation = 0.0_f32;
+
+        let cx = (self.min_x + self.max_x) * 0.5;
+        let cy = (self.min_y + self.max_y) * 0.5;
+        let cz = (self.min_z + self.max_z) * 0.5;
+
+        let ex = (self.max_x - self.min_x) * 0.5;
+        let ey = (self.max_y - self.min_y) * 0.5;
+        let ez = (self.max_z - self.min_z) * 0.5;
+
+        for i in 0..pos_x.len() {
+            let dx = pos_x[i] - cx;
+            let dy = pos_y[i] - cy;
+            let dz = pos_z[i] - cz;
+
+            let abs_x = dx.abs();
+            let abs_y = dy.abs();
+            let abs_z = dz.abs();
+
+            let qx = abs_x - ex;
+            let qy = abs_y - ey;
+            let qz = abs_z - ez;
+
+            let max_q = qx.max(qy).max(qz);
+
+            let mut dd_dx = 0.0;
+            let mut dd_dy = 0.0;
+            let mut dd_dz = 0.0;
+
+            let dist_sq = if max_q <= 0.0 {
+                // Inside the box -> violation!
+                max_violation = max_violation.max(-max_q);
+
+                if max_q == qx {
+                    dd_dx = dx.signum();
+                } else if max_q == qy {
+                    dd_dy = dy.signum();
+                } else {
+                    dd_dz = dz.signum();
+                }
+                1e-12 // Clamp for massive repulsive force
+            } else {
+                // Outside the box
+                let mut d_out = 0.0_f32;
+                if qx > 0.0 {
+                    d_out += qx * qx;
+                    dd_dx = qx * dx.signum();
+                }
+                if qy > 0.0 {
+                    d_out += qy * qy;
+                    dd_dy = qy * dy.signum();
+                }
+                if qz > 0.0 {
+                    d_out += qz * qz;
+                    dd_dz = qz * dz.signum();
+                }
+
+                let d = d_out.sqrt();
+                if d > 1e-6 {
+                    dd_dx /= d;
+                    dd_dy /= d;
+                    dd_dz /= d;
+                }
+                d_out
+            };
+
+            if dist_sq < d_hat && dist_sq > 0.0 {
+                active += 1;
+                let barrier_grad = crate::barrier::scaled_barrier_gradient(dist_sq, d_hat, kappa);
+
+                let d = dist_sq.sqrt();
+                let factor = barrier_grad * 2.0 * d;
+
+                grad_x[i] += factor * dd_dx;
+                grad_y[i] += factor * dd_dy;
+                grad_z[i] += factor * dd_dz;
+            }
+        }
+
+        (active, max_violation)
+    }
+
+    /// Compute maximum safe step size to prevent vertices from passing into the box.
+    pub fn compute_ccd_step(
+        &self,
+        prev_x: &[f32], prev_y: &[f32], prev_z: &[f32],
+        new_x: &[f32], new_y: &[f32], new_z: &[f32],
+    ) -> f32 {
+        let mut min_toi: f32 = 1.0;
+
+        for i in 0..prev_x.len() {
+            let px0 = prev_x[i];
+            let py0 = prev_y[i];
+            let pz0 = prev_z[i];
+
+            let px1 = new_x[i];
+            let py1 = new_y[i];
+            let pz1 = new_z[i];
+
+            let vx = px1 - px0;
+            let vy = py1 - py0;
+            let vz = pz1 - pz0;
+
+            let mut t_min = 0.0_f32;
+            let mut t_max = 1.0_f32;
+
+            let check_axis = |p0: f32, v: f32, min_b: f32, max_b: f32, t_min: &mut f32, t_max: &mut f32| -> bool {
+                if v.abs() < 1e-8 {
+                    p0 >= min_b && p0 <= max_b
+                } else {
+                    let mut t1 = (min_b - p0) / v;
+                    let mut t2 = (max_b - p0) / v;
+                    if t1 > t2 {
+                        std::mem::swap(&mut t1, &mut t2);
+                    }
+                    *t_min = t_min.max(t1);
+                    *t_max = t_max.min(t2);
+                    *t_min <= *t_max && *t_max >= 0.0
+                }
+            };
+
+            if check_axis(px0, vx, self.min_x, self.max_x, &mut t_min, &mut t_max) &&
+               check_axis(py0, vy, self.min_y, self.max_y, &mut t_min, &mut t_max) &&
+               check_axis(pz0, vz, self.min_z, self.max_z, &mut t_min, &mut t_max)
+
+                && (0.0..=1.0).contains(&t_min) {
+                    // It entered the box during this frame!
+                    min_toi = min_toi.min(t_min * 0.9);
+                }
+        }
+
+        min_toi.max(1e-6)
+    }
 }

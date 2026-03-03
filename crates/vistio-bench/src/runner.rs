@@ -13,6 +13,25 @@ use vistio_contact::{SpatialHash, VertexTriangleTest, ProjectionContactResponse}
 
 use crate::metrics::BenchmarkMetrics;
 use crate::scenarios::Scenario;
+use vistio_solver::pd_solver::{IpcCollisionHandler, IpcBarrierForces};
+
+struct RunnerIpcHandler<'a> {
+    pipeline: &'a mut CollisionPipeline,
+    d_hat: f32,
+    kappa: f32,
+    mesh: &'a vistio_mesh::TriangleMesh,
+}
+
+impl<'a> IpcCollisionHandler for RunnerIpcHandler<'a> {
+    fn detect_contacts(&mut self, px: &[f32], py: &[f32], pz: &[f32]) -> IpcBarrierForces {
+        self.pipeline.detect_ipc_contacts(px, py, pz, self.d_hat, self.kappa)
+    }
+
+    fn compute_ccd_step(&mut self, prev_x: &[f32], prev_y: &[f32], prev_z: &[f32], new_x: &[f32], new_y: &[f32], new_z: &[f32]) -> f32 {
+        self.pipeline.compute_ccd_step(&self.mesh.indices, prev_x, prev_y, prev_z, new_x, new_y, new_z)
+    }
+}
+
 
 /// Runs benchmark scenarios and collects metrics.
 pub struct BenchmarkRunner;
@@ -28,14 +47,28 @@ impl BenchmarkRunner {
     ) -> VistioResult<BenchmarkMetrics> {
         use crate::scenarios::ScenarioKind;
 
+        let is_ipc = scenario.config.ipc_enabled;
+
+        let broad_phase: Box<dyn vistio_contact::broad::BroadPhase + Send + Sync> = if is_ipc {
+            Box::new(vistio_contact::bvh::BvhBroadPhase::new(&scenario.garment))
+        } else {
+            Box::new(SpatialHash::new(0.05))
+        };
+
+        let thickness = if is_ipc { scenario.config.barrier_d_hat * 1.5 } else { 0.0 };
+
         let mut pipeline = CollisionPipeline::new(
-            Box::new(SpatialHash::new(0.05)),
+            broad_phase,
             Box::new(VertexTriangleTest),
             Box::new(ProjectionContactResponse),
             scenario.garment.clone(),
-            0.0, // thickness (0.0 disables Tier 1 self-collision)
-            0.0,  // stiffness
+            thickness, // thickness (0.0 disables Tier 1 self-collision)
+            0.0,       // stiffness
         );
+
+        if is_ipc {
+            pipeline = pipeline.with_self_collision(&Topology::build(&scenario.garment), 1);
+        }
 
         match scenario.kind {
             ScenarioKind::SphereDrape => {
@@ -50,7 +83,7 @@ impl BenchmarkRunner {
             },
             ScenarioKind::CantileverBending => {
                 pipeline = pipeline
-                    .with_box(-0.5, 0.5, 0.0, 0.99, 0.0, 0.5);
+                    .with_box(-0.1, 0.1, 0.0, 0.499, -0.2, 0.0);
             },
             _ => {
                 pipeline = pipeline.with_ground(-0.3);
@@ -72,7 +105,7 @@ impl BenchmarkRunner {
         let topology = Topology::build(&scenario.garment);
 
         // Choose init path based on whether a material is specified
-        let vertex_mass = if let Some(ref properties) = scenario.material {
+        let _vertex_mass = if let Some(ref properties) = scenario.material {
             // Tier 3 path: when material is anisotropic, use Discrete Shells + anisotropic model
             // Tier 2 path: when material is isotropic, use dihedral + co-rotational model
             if properties.is_anisotropic() {
@@ -105,10 +138,10 @@ impl BenchmarkRunner {
             scenario.vertex_mass
         };
 
-        // Initialize simulation state
-        let mut state = SimulationState::from_mesh(
+        // Initialize simulation state with solver's lumped masses for consistency
+        let mut state = SimulationState::from_mesh_with_masses(
             &scenario.garment,
-            vertex_mass,
+            solver.lumped_masses(),
             &scenario.pinned,
         )?;
 
@@ -144,14 +177,50 @@ impl BenchmarkRunner {
                 }
             }
 
-            // Solver step (PD local-global iterations)
-            let result: StepResult = solver.step(&mut state, scenario.dt)?;
-            step_times.push(result.wall_time);
-            total_iterations += result.iterations;
+            let is_ipc = scenario.config.ipc_enabled;
+            if let Some(mut pipeline) = collision.take() {
+                if is_ipc {
+                    // Update pipeline to know IPC is enabled (skip projection self-col)
+                    pipeline = pipeline.with_ipc(true);
+                    let d_hat = scenario.config.barrier_d_hat;
+                    let kappa = vistio_contact::barrier::estimate_initial_kappa(
+                        scenario.config.barrier_kappa,
+                        scenario.vertex_mass,
+                        scenario.config.gravity[1].abs(),
+                        d_hat,
+                    );
 
-            // Collision step (after solver resolves elastic forces)
-            if let Some(ref mut pipeline) = collision {
-                let _ = pipeline.step(&mut state)?;
+                    let mut handler = RunnerIpcHandler {
+                        pipeline: &mut pipeline,
+                        d_hat,
+                        kappa,
+                        mesh: &scenario.garment,
+                    };
+
+                    let result = solver.step_with_ipc(&mut state, scenario.dt, &mut handler)?;
+                    step_times.push(result.wall_time);
+                    total_iterations += result.iterations;
+
+                    // Ground plane still handled post-solve for now
+                    let _ = pipeline.step(&mut state)?;
+                } else {
+                    let result: StepResult = solver.step(&mut state, scenario.dt)?;
+                    step_times.push(result.wall_time);
+                    total_iterations += result.iterations;
+
+                    // Collision step (after solver resolves elastic forces)
+                    let _ = pipeline.step(&mut state)?;
+                }
+                collision = Some(pipeline);
+            } else if is_ipc {
+                let mut empty_handler = vistio_solver::pd_solver::EmptyIpcHandler;
+                let result = solver.step_with_ipc(&mut state, scenario.dt, &mut empty_handler)?;
+                step_times.push(result.wall_time);
+                total_iterations += result.iterations;
+            } else {
+                let result: StepResult = solver.step(&mut state, scenario.dt)?;
+                step_times.push(result.wall_time);
+                total_iterations += result.iterations;
             }
         }
 

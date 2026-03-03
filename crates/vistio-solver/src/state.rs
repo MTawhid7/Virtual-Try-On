@@ -66,6 +66,20 @@ impl SimulationState {
         pinned: &[bool],
     ) -> VistioResult<Self> {
         let n = mesh.vertex_count();
+        let masses = vec![vertex_mass; n];
+        Self::from_mesh_with_masses(mesh, &masses, pinned)
+    }
+
+    /// Initialize simulation state from a mesh with per-vertex masses.
+    ///
+    /// Use this with `solver.lumped_masses()` to ensure mass consistency
+    /// between the system matrix and the simulation state.
+    pub fn from_mesh_with_masses(
+        mesh: &TriangleMesh,
+        masses: &[f32],
+        pinned: &[bool],
+    ) -> VistioResult<Self> {
+        let n = mesh.vertex_count();
 
         if pinned.len() != n {
             return Err(vistio_types::VistioError::InvalidMesh(format!(
@@ -74,14 +88,23 @@ impl SimulationState {
                 n
             )));
         }
+        if masses.len() != n {
+            return Err(vistio_types::VistioError::InvalidMesh(format!(
+                "Mass array length ({}) != vertex count ({})",
+                masses.len(),
+                n
+            )));
+        }
 
-        let mut mass = vec![vertex_mass; n];
-        let mut inv_mass = vec![1.0 / vertex_mass; n];
+        let mut mass = masses.to_vec();
+        let mut inv_mass = vec![0.0_f32; n];
 
         for i in 0..n {
             if pinned[i] {
                 mass[i] = f32::MAX;
                 inv_mass[i] = 0.0;
+            } else {
+                inv_mass[i] = if mass[i] > 1e-12 { 1.0 / mass[i] } else { 0.0 };
             }
         }
 

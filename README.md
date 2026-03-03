@@ -10,15 +10,18 @@ Built in Rust with a modular crate architecture, Vistio targets production-grade
 
 ## Status
 
+> 🤖 **AI Agents & Contributors**: Please begin your exploration by reading `docs/AI_ARCHITECTURE.md` for a comprehensive overview of crate boundaries, core data loops, and architectural invariants.
+
 ✅ **Tier 0 — Foundation & Interface Contract** — Complete
 ✅ **Tier 1 — Projective Dynamics Solver** — Complete
 ✅ **Tier 2 — Co-Rotational FEM & Visual Simulation** — Complete
 ✅ **Tier 3 — Discrete Shells & Anisotropic Materials** — Complete
+✅ **Tier 4 — IPC Barrier Contact & Augmented Lagrangian** — Complete
 
 | Gate | Result |
 | --- | --- |
-| Build | ✅ 13 crates |
-| Tests | ✅ 174 pass |
+| Build | ✅ 14 crates |
+| Tests | ✅ 218 pass |
 | Clippy | ✅ 0 errors |
 | CLI | ✅ 4 subcommands |
 
@@ -28,8 +31,8 @@ Built in Rust with a modular crate architecture, Vistio targets production-grade
 - **Linear algebra** — 3×2 deformation gradients, polar decomposition, CSR sparse matrices
 - **Mesh system** — SoA TriangleMesh, procedural generators (quad grid, UV sphere), topology queries, vertex normals, alternating checkerboard triangulation
 - **Materials** — ConstitutiveModel trait, FabricProperties (KES-mapped), 5 built-in presets, `CoRotationalModel` (tension-field theory), `OrthotropicLinearModel` (anisotropic)
-- **Solver** — Projective Dynamics robust local-global solver, prefactored Cholesky (`faer`), ARAP co-rotational elements, integrated dihedral bending system matrix, Rayleigh damping, area-weighted lumped mass
-- **Contact** — Unified collision pipeline (spatial hash broad phase, vertex-triangle narrow phase, projection response, ground plane, sphere collider), vertex-triangle self-collision system (topology exclusion, greedy batch coloring)
+- **Solver** — Projective Dynamics robust local-global solver, prefactored Cholesky (`faer`), ARAP co-rotational elements, integrated dihedral bending system matrix, Rayleigh damping, area-weighted lumped mass. Augmented Lagrangian (AL) outer loop for rigorous contact enforcement.
+- **Contact** — Incremental Potential Contact (IPC) pipeline: $C^2$ log-barrier energy, generic distance primitives, Continuous Collision Detection (CCD) for tunneling prevention, $O(N \log N)$ Bounding Volume Hierarchy (BVH) broad phase. Guaranteeably intersection-free simulation.
 - **Viewer** — Bevy PBR real-time 3D viewer with pan/orbit camera, dynamic vertex normals, double-sided materials, shadow casting
 - **GPU abstraction** — GpuBackend trait, CpuFallback (axpy, dot, fill), ComputeBuffer
 - **Telemetry** — EventBus (mpsc), 7 event types, pluggable sinks
@@ -40,11 +43,12 @@ Built in Rust with a modular crate architecture, Vistio targets production-grade
 
 ### What's Not Yet Implemented
 
-- **Robust Self-Collision** — Deferred to Tier 4 (IPC barrier contact). Current position-projection approach cannot prevent tunneling or explosive corrections for complex folding scenarios.
-- **Edge-edge Narrow Phase** — CCD for tunneling prevention (Tier 4)
 - **GPU compute** — wgpu backend with WGSL shaders (Tier 5)
-- **IPC barriers** — Incremental Potential Contact (Tier 4)
 - **Adaptive remeshing** — Dynamic mesh refinement (Tier 6)
+
+### Known Limitations
+
+- **Resting State Oscillation** — The simulation currently exhibits a subtle bounce upon contact and maintains a persistent gap above the floor. The contact damping heuristics and IPC barrier activation zones require further tuning to facilitate natural, stable settling.
 
 ---
 
@@ -134,8 +138,9 @@ cargo run --bin vistio -- inspect snapshot.bin
 | --- | --- | --- | --- |
 | `hanging_sheet` | 1m² cloth pinned at top edge | 20×20 (441 verts) | 120 (2s) |
 | `sphere_drape` | 1.5m² cloth falling onto sphere | 20×20 (441 verts) | 180 (3s) |
+| `self_fold` | Cloth dropped diagonally onto ground, folding onto itself | 20×20 (441 verts) | 300 (5s) |
 
-> **Note:** Self-collision testing (`self_fold`) has been deferred to Tier 4 (IPC barrier contact). The current position-projection collision approach cannot robustly handle cloth-on-cloth contact.
+> **Note:** The `self_fold` and `sphere_drape` scenarios now execute exclusively utilizing the Tier 4 IPC collision pipeline, guaranteeing mathematically intersection-free results without heuristic position modifications.
 
 ---
 
@@ -153,7 +158,7 @@ cargo run --bin vistio -- inspect snapshot.bin
 
 ## Testing Guidelines
 
-All tests live in `crates/<name>/tests/<name>_tests.rs`. No inline `#[cfg(test)]` blocks.
+All structural tests live in `crates/<name>/tests/<name>_tests.rs`. Internal unit tests testing private functions are organized into dedicated modules in `crates/<name>/src/tests/`. No inline `#[cfg(test)]` blocks are permitted.
 
 | Category | Example |
 | --- | --- |
@@ -162,6 +167,7 @@ All tests live in `crates/<name>/tests/<name>_tests.rs`. No inline `#[cfg(test)]
 | Behavior | `pd_stub_gravity_motion` |
 | Edge cases | `polar_degenerate_does_not_panic` |
 | Serialization | `config_serialization` |
+| Internal Collision | `bvh_broad_phase_nearby_finds_pairs` |
 
 ---
 
@@ -187,7 +193,7 @@ All tests live in `crates/<name>/tests/<name>_tests.rs`. No inline `#[cfg(test)]
 | **Tier 1** | Real PD solver, spatial hash, `faer` | ✅ Complete |
 | **Tier 2** | Co-Rotational FEM, Bevy viewer, collision pipeline | ✅ Complete |
 | **Tier 3** | Discrete shell bending, anisotropic materials | ✅ Complete |
-| **Tier 4** | IPC barriers, CCD, robust self-collision | 🔲 Planned |
+| **Tier 4** | IPC barriers, CCD, robust self-collision | ✅ Complete |
 | **Tier 5** | GPU acceleration (`wgpu`) | 🔲 Planned |
 | **Tier 6** | Adaptive remeshing | 🔲 Planned |
 

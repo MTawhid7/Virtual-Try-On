@@ -127,7 +127,7 @@ fn state_kinetic_energy() {
 #[test]
 fn config_default() {
     let config = SolverConfig::default();
-    assert_eq!(config.max_iterations, 15);
+    assert_eq!(config.max_iterations, 10);
     assert!(config.tolerance < 1e-4);
     assert!((config.gravity[1] + 9.81).abs() < 1e-3);
 }
@@ -962,4 +962,48 @@ fn fabric_properties_warp_weft_ratio() {
 
     let ratio = cotton.warp_weft_ratio();
     assert!(ratio > 1.0, "Cotton warp > weft, ratio should be > 1.0, got {}", ratio);
+}
+
+// ─── Tier 4: Augmented Lagrangian IPC Contact Tests ───────────
+
+
+
+#[test]
+fn tier4_solver_init_succeeds() {
+    let mesh = quad_grid(5, 5, 1.0, 1.0);
+    let topology = Topology::build(&mesh);
+    let mut config = SolverConfig::default();
+    config.ipc_enabled = true;
+    let db = MaterialDatabase::with_defaults();
+    let props = db.get("cotton_twill").unwrap();
+    let model = Box::new(CoRotationalModel::new());
+
+    let mut solver = ProjectiveDynamicsSolver::new();
+    let result = solver.init_with_material_tier4(&mesh, &topology, &config, props, model, &vec![false; mesh.vertex_count()]);
+    assert!(result.is_ok(), "Tier 4 init should succeed");
+}
+
+#[test]
+fn tier4_solver_step_with_ipc_no_contacts() {
+    let mesh = quad_grid(5, 5, 1.0, 1.0);
+    let topology = Topology::build(&mesh);
+    let mut config = SolverConfig { max_iterations: 3, ..Default::default() };
+    config.ipc_enabled = true;
+    let db = MaterialDatabase::with_defaults();
+    let props = db.get("cotton_twill").unwrap();
+    let model = Box::new(CoRotationalModel::new());
+
+    let mut solver = ProjectiveDynamicsSolver::new();
+    solver.init_with_material_tier4(&mesh, &topology, &config, props, model, &vec![false; mesh.vertex_count()]).unwrap();
+
+    let n = mesh.vertex_count();
+    let vm = props.mass_per_vertex(n, 1.0);
+    let mut state = SimulationState::from_mesh(&mesh, vm, &vec![false; n]).unwrap();
+
+    let mut handler = vistio_solver::pd_solver::EmptyIpcHandler;
+    let result = solver.step_with_ipc(&mut state, 1.0 / 60.0, &mut handler);
+    assert!(result.is_ok(), "Tier 4 solver step_with_ipc should succeed");
+
+    let step_result = result.unwrap();
+    assert!(step_result.iterations > 0, "Should run at least 1 iteration");
 }

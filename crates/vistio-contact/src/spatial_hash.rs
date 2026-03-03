@@ -6,7 +6,6 @@
 
 use std::collections::HashMap;
 
-use vistio_solver::SimulationState;
 use vistio_types::VistioResult;
 
 use crate::broad::{BroadPhase, CandidatePair};
@@ -44,12 +43,12 @@ impl SpatialHash {
 }
 
 impl BroadPhase for SpatialHash {
-    fn update(&mut self, state: &SimulationState, _thickness: f32) -> VistioResult<()> {
+    fn update(&mut self, pos_x: &[f32], pos_y: &[f32], pos_z: &[f32], _thickness: f32) -> VistioResult<()> {
         self.grid.clear();
-        self.vertex_count = state.vertex_count as u32;
+        self.vertex_count = pos_x.len() as u32;
 
-        for i in 0..state.vertex_count {
-            let key = self.cell_key(state.pos_x[i], state.pos_y[i], state.pos_z[i]);
+        for i in 0..pos_x.len() {
+            let key = self.cell_key(pos_x[i], pos_y[i], pos_z[i]);
             self.grid.entry(key).or_default().push(i as u32);
         }
 

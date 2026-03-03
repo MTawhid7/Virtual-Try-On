@@ -23,6 +23,8 @@ pub enum ScenarioKind {
     CusickDrape,
     CantileverBending,
     UniaxialStretch,
+    /// Cloth dropped diagonally onto ground, folding onto itself.
+    SelfFold,
 }
 
 impl ScenarioKind {
@@ -34,6 +36,7 @@ impl ScenarioKind {
             ScenarioKind::CusickDrape,
             ScenarioKind::CantileverBending,
             ScenarioKind::UniaxialStretch,
+            ScenarioKind::SelfFold,
         ]
     }
 
@@ -45,6 +48,7 @@ impl ScenarioKind {
             ScenarioKind::CusickDrape => "cusick_drape",
             ScenarioKind::CantileverBending => "cantilever_bending",
             ScenarioKind::UniaxialStretch => "uniaxial_stretch",
+            ScenarioKind::SelfFold => "self_fold",
         }
     }
 }
@@ -125,12 +129,17 @@ impl Scenario {
 
         let body = uv_sphere(0.3, 16, 32);
 
+        let config = SolverConfig {
+            ipc_enabled: true, // Use IPC guarantees
+            ..Default::default()
+        };
+
         Self {
             kind: ScenarioKind::SphereDrape,
             garment,
             body: Some(body),
             pinned: vec![false; n], // Nothing pinned — free fall
-            config: SolverConfig::default(),
+            config,
             timesteps: 180, // 3 seconds
             dt: 1.0 / 60.0,
             vertex_mass: 0.002,
@@ -139,7 +148,6 @@ impl Scenario {
     }
 
     /// Create a scenario by kind.
-
     pub fn cusick_drape() -> Self {
         let mut garment = vistio_mesh::generators::circular_grid(0.30, 64, 15);
         let n = garment.vertex_count();
@@ -161,16 +169,19 @@ impl Scenario {
     }
 
     pub fn cantilever_bending() -> Self {
-        let cols = 5;
+        let cols = 10;
         let rows = 40;
-        let mut garment = vistio_mesh::generators::quad_grid(cols, rows, 0.05, 0.20);
+        let mut garment = vistio_mesh::generators::quad_grid(cols, rows, 0.10, 0.40);
         let n = garment.vertex_count();
         for i in 0..n {
-            garment.pos_z[i] = garment.pos_y[i] + 0.10;
-            garment.pos_y[i] = 1.0;
+            garment.pos_z[i] = garment.pos_y[i] + 0.20; // z: [0.0, 0.40]
+            garment.pos_y[i] = 0.5; // Starts resting on the shelf at y=0.5
         }
         let mut pinned = vec![false; n];
-        for i in 0..=cols { pinned[i] = true; }
+        // Pin the first three rows (which are situated on the shelf)
+        for i in 0..3 * (cols + 1) {
+            pinned[i] = true;
+        }
         Self {
             kind: ScenarioKind::CantileverBending,
             garment,
@@ -179,7 +190,7 @@ impl Scenario {
             config: SolverConfig::default(),
             timesteps: 300,
             dt: 1.0 / 60.0,
-            vertex_mass: 0.0001,
+            vertex_mass: 0.001,
             material: None,
         }
     }
@@ -194,9 +205,9 @@ impl Scenario {
             garment.pos_y[i] = 1.0;
         }
         let mut pinned = vec![false; n];
-        for i in 0..n {
-            if garment.pos_x[i] < -0.249 { pinned[i] = true; }
-            if garment.pos_x[i] >  0.249 { pinned[i] = true; }
+        for (i, p) in pinned.iter_mut().enumerate() {
+            if garment.pos_x[i] < -0.249 { *p = true; }
+            if garment.pos_x[i] >  0.249 { *p = true; }
         }
         Self {
             kind: ScenarioKind::UniaxialStretch,
@@ -211,6 +222,39 @@ impl Scenario {
         }
     }
 
+    /// Create the self-fold scenario.
+    ///
+    /// Cloth dropped diagonally onto the ground, folding onto itself.
+    pub fn self_fold() -> Self {
+        let mut garment = quad_grid(20, 20, 1.0, 1.0);
+        let n = garment.vertex_count();
+
+        // Rotate at an angle and elevate
+        for i in 0..n {
+            let cx = garment.pos_x[i] - 0.5;
+            let cy = garment.pos_y[i] - 0.5;
+            garment.pos_z[i] = cx * 0.707 - cy * 0.707;
+            garment.pos_y[i] = cx * 0.707 + cy * 0.707 + 1.0;
+        }
+
+        let config = SolverConfig {
+            ipc_enabled: true, // Use IPC for self-collision
+            ..Default::default()
+        };
+
+        Self {
+            kind: ScenarioKind::SelfFold,
+            garment,
+            body: None,
+            pinned: vec![false; n],
+            config,
+            timesteps: 300,
+            dt: 1.0 / 60.0,
+            vertex_mass: 0.002,
+            material: None,
+        }
+    }
+
     pub fn from_kind(kind: ScenarioKind) -> Self {
         match kind {
             ScenarioKind::HangingSheet => Self::hanging_sheet(),
@@ -218,6 +262,7 @@ impl Scenario {
             ScenarioKind::CusickDrape => Self::cusick_drape(),
             ScenarioKind::CantileverBending => Self::cantilever_bending(),
             ScenarioKind::UniaxialStretch => Self::uniaxial_stretch(),
+            ScenarioKind::SelfFold => Self::self_fold(),
         }
     }
 

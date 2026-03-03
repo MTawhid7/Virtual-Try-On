@@ -63,4 +63,71 @@ impl GroundPlane {
             total_force_magnitude: total_force,
         }
     }
+
+    /// Compute IPC barrier gradients for vertices near the ground.
+    pub fn detect_ipc_contacts(
+        &self,
+        pos_y: &[f32],
+        d_hat: f32,
+        kappa: f32,
+        grad_y: &mut [f32],
+    ) -> (usize, f32) {
+        let mut active = 0;
+        let mut max_violation = 0.0_f32;
+
+        for i in 0..pos_y.len() {
+            let d_surface = pos_y[i] - self.height;
+
+            if d_surface <= 0.0 {
+                // Inside the ground -> violation!
+                max_violation = max_violation.max(-d_surface);
+
+                // Use a meaningful clamped distance so that the chain-rule
+                // factor 2·d_clamped produces a real restoring force, not ≈0.
+                let d_clamped = 1e-4_f32;
+                let dist_sq = d_clamped * d_clamped;
+                active += 1;
+                let barrier_grad = crate::barrier::scaled_barrier_gradient(dist_sq, d_hat, kappa);
+
+                // Force = -∇barrier.  barrier_grad is ∂b/∂(d²) which is negative (repulsive).
+                // The spatial chain rule: ∂b/∂y = ∂b/∂(d²) · ∂(d²)/∂y = barrier_grad · 2·d · 1
+                // We want a strong UPWARD push, so we use the clamped d:
+                grad_y[i] += barrier_grad * 2.0 * d_clamped;
+            } else {
+                let dist_sq = d_surface * d_surface;
+                if dist_sq < d_hat {
+                    active += 1;
+                    let barrier_grad = crate::barrier::scaled_barrier_gradient(dist_sq, d_hat, kappa);
+
+                    grad_y[i] += barrier_grad * 2.0 * d_surface;
+                }
+            }
+        }
+        (active, max_violation)
+    }
+
+    /// Compute maximum safe step size to prevent vertices from passing through the ground.
+    pub fn compute_ccd_step(
+        &self,
+        prev_y: &[f32],
+        new_y: &[f32],
+    ) -> f32 {
+        let mut min_toi: f32 = 1.0;
+
+        for i in 0..prev_y.len() {
+            let py0 = prev_y[i];
+            let py1 = new_y[i];
+
+            if py0 > self.height && py1 < self.height {
+                let vy = py1 - py0;
+                let t = (self.height - py0) / vy;
+
+                if (0.0..=1.0).contains(&t) {
+                    min_toi = min_toi.min(t * 0.9);
+                }
+            }
+        }
+
+        min_toi.max(1e-6)
+    }
 }

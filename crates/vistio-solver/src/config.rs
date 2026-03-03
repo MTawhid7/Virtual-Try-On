@@ -45,6 +45,64 @@ pub struct SolverConfig {
     /// Optional material name (from MaterialDatabase). When set, the solver
     /// uses material-aware initialization with the corresponding FabricProperties.
     pub material_name: Option<String>,
+
+    // ─── IPC + Augmented Lagrangian (Tier 4) ─────────────────
+
+    /// Barrier activation threshold d̂ (squared distance units).
+    /// Contacts with d² < d_hat activate the barrier.
+    /// Default: 1e-3 (~3cm activation zone for garment-scale simulation).
+    pub barrier_d_hat: f32,
+
+    /// Separate barrier threshold for self-collision contacts.
+    /// Typically equal to or larger than `barrier_d_hat` to ensure
+    /// visible layer separation when cloth folds onto itself.
+    /// Default: 1e-3.
+    pub self_collision_d_hat: f32,
+
+    /// Physical fabric thickness (meters) for C-IPC thickness-aware contact.
+    /// Enforces minimum separation between cloth mid-surfaces equal to this value.
+    /// Derived from KES-FB3 compression measurements.
+    /// Default: 0.001 (1mm, typical for cotton/jersey).
+    pub cloth_thickness: f32,
+
+    /// Initial barrier stiffness scaling κ.
+    /// Set to 0.0 to use adaptive estimation based on mesh/material properties.
+    /// Default: 0.0 (adaptive).
+    pub barrier_kappa: f32,
+
+    /// Whether IPC contact is enabled (Tier 4).
+    pub ipc_enabled: bool,
+
+    /// Whether CCD step validation is enabled.
+    pub ccd_enabled: bool,
+
+    /// Maximum Augmented Lagrangian outer iterations.
+    /// Default: 5.
+    pub al_max_iterations: u32,
+
+    /// Initial AL penalty parameter μ₀.
+    /// Default: 1e3.
+    pub al_mu_initial: f32,
+
+    /// AL penalty growth factor β (μ → β·μ when constraints not satisfied).
+    /// Default: 2.0.
+    pub al_mu_growth: f32,
+
+    /// AL constraint violation tolerance ε_AL.
+    /// Default: 1e-4.
+    pub al_tolerance: f32,
+
+    /// Coulomb friction coefficient μ for contact surfaces.
+    /// Controls how much tangential velocity is removed during contact.
+    /// 0.0 = frictionless, 0.5 = typical cloth, 1.0 = very rough.
+    /// Default: 0.4.
+    pub friction_coefficient: f32,
+
+    /// Contact-aware velocity damping factor.
+    /// Applied only to vertices currently in contact with a collider.
+    /// Closer to 1.0 = less damping, closer to 0.0 = more damping.
+    /// Default: 0.05 (strong damping for inelastic cloth contact).
+    pub contact_damping: f32,
 }
 
 impl Default for SolverConfig {
@@ -61,6 +119,19 @@ impl Default for SolverConfig {
             spectral_radius: 0.5,
             rayleigh_mass_damping: 2.0,
             material_name: None,
+            // IPC defaults — disabled unless explicitly enabled
+            barrier_d_hat: 1e-3,  // ~3cm activation zone (squared distance)
+            self_collision_d_hat: 1e-3, // same activation for self-collision
+            cloth_thickness: 0.001, // 1mm physical fabric thickness
+            barrier_kappa: 0.0,   // 0 = adaptive estimation
+            ipc_enabled: false,
+            ccd_enabled: true,
+            al_max_iterations: 3,
+            al_mu_initial: 1.0,
+            al_mu_growth: 2.0,
+            al_tolerance: 1e-4,
+            friction_coefficient: 0.4,
+            contact_damping: 0.3,
         }
     }
 }

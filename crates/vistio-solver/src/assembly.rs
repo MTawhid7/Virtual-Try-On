@@ -153,6 +153,7 @@ pub fn assemble_system_matrix(
 /// * `elements` — Precomputed element data
 /// * `coord` — Which coordinate axis (0=X, 1=Y, 2=Z)
 /// * `bending` — Optional bending model with targets
+#[allow(clippy::too_many_arguments)]
 pub fn assemble_rhs(
     n: usize,
     mass: &[f32],
@@ -250,4 +251,32 @@ pub enum BendingRhs<'a> {
         data: &'a DiscreteShellsBendingData,
         targets: &'a [(f32, f32, f32, f32)],
     },
+}
+
+/// Accumulate IPC barrier gradient and Augmented Lagrangian multiplier
+/// contributions into an existing RHS vector.
+///
+/// RHS += -(μ · barrier_grad + λ) for each vertex, where:
+/// - `barrier_grad` is the barrier energy gradient w.r.t. positions
+///   (already scaled by κ in `detect_ipc_contacts`)
+/// - `lambda` is the Lagrange multiplier estimate
+/// - `mu` is the current AL penalty parameter
+///
+/// The negative sign converts energy gradient into force (F = -∇E).
+///
+/// # Arguments
+/// * `rhs` — RHS vector to modify in place (length N)
+/// * `barrier_grad` — per-vertex barrier gradient (length N), already κ-scaled
+/// * `lambda` — per-vertex Lagrange multiplier (length N)
+/// * `mu` — current AL penalty parameter
+pub fn assemble_barrier_rhs(
+    rhs: &mut [f32],
+    barrier_grad: &[f32],
+    lambda: &[f32],
+    mu: f32,
+) {
+    for i in 0..rhs.len().min(barrier_grad.len()) {
+        // Force = -(μ · ∇barrier + λ)
+        rhs[i] -= mu * barrier_grad[i] + lambda[i];
+    }
 }

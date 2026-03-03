@@ -1,0 +1,90 @@
+   Compiling vistio-contact v0.1.0 (/Users/tawhid/Documents/Codes/vistio/crates/vistio-contact)
+warning: unused import: `vistio_math::Vec3`
+ --> crates/vistio-contact/src/tests/mod.rs:1:5
+  |
+1 | use vistio_math::Vec3;
+  |     ^^^^^^^^^^^^^^^^^
+  |
+  = note: `#[warn(unused_imports)]` (part of `#[warn(unused)]`) on by default
+
+warning: unused import: `crate::broad::BroadPhase`
+ --> crates/vistio-contact/src/tests/mod.rs:2:5
+  |
+2 | use crate::broad::BroadPhase;
+  |     ^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: unused import: `vistio_math::Vec3`
+ --> crates/vistio-contact/src/tests/barrier_tests.rs:1:5
+  |
+1 | use vistio_math::Vec3;
+  |     ^^^^^^^^^^^^^^^^^
+
+warning: unused import: `crate::broad::BroadPhase`
+ --> crates/vistio-contact/src/tests/barrier_tests.rs:2:5
+  |
+2 | use crate::broad::BroadPhase;
+  |     ^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: unused import: `vistio_math::Vec3`
+ --> crates/vistio-contact/src/tests/bvh_tests.rs:1:5
+  |
+1 | use vistio_math::Vec3;
+  |     ^^^^^^^^^^^^^^^^^
+
+warning: unused import: `crate::broad::BroadPhase`
+ --> crates/vistio-contact/src/tests/ccd_tests.rs:2:5
+  |
+2 | use crate::broad::BroadPhase;
+  |     ^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: unused import: `crate::broad::BroadPhase`
+ --> crates/vistio-contact/src/tests/distance_primitives_tests.rs:2:5
+  |
+2 | use crate::broad::BroadPhase;
+  |     ^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: unused import: `vistio_math::Vec3`
+ --> crates/vistio-contact/src/tests/ipc_response_tests.rs:1:5
+  |
+1 | use vistio_math::Vec3;
+  |     ^^^^^^^^^^^^^^^^^
+
+warning: unused import: `crate::broad::BroadPhase`
+ --> crates/vistio-contact/src/tests/ipc_response_tests.rs:2:5
+  |
+2 | use crate::broad::BroadPhase;
+  |     ^^^^^^^^^^^^^^^^^^^^^^^^
+
+error[E0624]: associated function `build` is private
+   --> crates/vistio-contact/src/tests/bvh_tests.rs:56:29
+    |
+ 56 |         let tree = BvhTree::build(&aabbs).unwrap();
+    |                             ^^^^^ private associated function
+    |
+   ::: crates/vistio-contact/src/bvh.rs:122:5
+    |
+122 |     fn build(leaf_aabbs: &[Aabb]) -> Option<Self> {
+    |     --------------------------------------------- private associated function defined here
+
+error[E0616]: field `nodes` of struct `bvh::BvhTree` is private
+  --> crates/vistio-contact/src/tests/bvh_tests.rs:57:25
+   |
+57 |         assert_eq!(tree.nodes.len(), 1);
+   |                         ^^^^^ private field
+
+error[E0624]: associated function `build` is private
+   --> crates/vistio-contact/src/tests/bvh_tests.rs:63:26
+    |
+ 63 |         assert!(BvhTree::build(&aabbs).is_none());
+    |                          ^^^^^ private associated function
+    |
+   ::: crates/vistio-contact/src/bvh.rs:122:5
+    |
+122 |     fn build(leaf_aabbs: &[Aabb]) -> Option<Self> {
+    |     --------------------------------------------- private associated function defined here
+
+Some errors have detailed explanations: E0616, E0624.
+For more information about an error, try `rustc --explain E0616`.
+warning: `vistio-contact` (lib test) generated 9 warnings
+error: could not compile `vistio-contact` (lib test) due to 3 previous errors; 9 warnings emitted
+warning: build failed, waiting for other jobs to finish...

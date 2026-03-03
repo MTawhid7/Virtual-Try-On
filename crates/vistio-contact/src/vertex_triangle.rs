@@ -86,8 +86,9 @@ impl NarrowPhase for VertexTriangleTest {
 
 /// Test proximity between a point and a triangle.
 ///
-/// Returns `Some(ContactPair)` if the point is within `thickness` of the triangle,
+/// Returns `Some(ContactPair)` if the distance is < `thickness`.
 /// `None` otherwise.
+#[allow(clippy::too_many_arguments)]
 fn point_triangle_proximity(
     p: Vec3,
     a: Vec3,

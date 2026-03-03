@@ -30,7 +30,7 @@ use vistio_mesh::TriangleMesh;
 use vistio_mesh::topology::Topology;
 use vistio_types::VistioResult;
 
-use crate::assembly::{assemble_rhs, assemble_system_matrix, BendingModel, BendingRhs};
+use crate::assembly::{assemble_rhs, assemble_system_matrix, assemble_barrier_rhs, BendingModel, BendingRhs};
 use crate::bending::BendingData;
 use crate::config::SolverConfig;
 use crate::discrete_shells::DiscreteShellsBendingData;
@@ -87,6 +87,13 @@ impl ProjectiveDynamicsSolver {
             n: 0,
             material_model: None,
         }
+    }
+
+    /// Return the area-weighted lumped masses computed during init().
+    /// Callers should use these for `SimulationState` construction
+    /// to ensure the state mass matches the system matrix mass.
+    pub fn lumped_masses(&self) -> &[f32] {
+        &self.mass
     }
 
     /// Initialize the solver with material properties and a constitutive model.
@@ -183,6 +190,24 @@ impl ProjectiveDynamicsSolver {
         self.material_model = Some(model);
         self.initialized = true;
         Ok(())
+    }
+
+    /// Initialize the solver with Tier 4 Augmented Lagrangian IPC contact.
+    ///
+    /// This is the Tier 4 initialization path. It builds upon Tier 3 by:
+    /// - Deriving per-element stiffness from `FabricProperties`
+    /// - Using **Discrete Shells** (cotangent-weighted) bending model
+    /// - Preparing the configuration for the `step_with_ipc()` AL outer loop
+    pub fn init_with_material_tier4(
+        &mut self,
+        mesh: &TriangleMesh,
+        topology: &Topology,
+        config: &SolverConfig,
+        properties: &FabricProperties,
+        model: Box<dyn ConstitutiveModel>,
+        pinned: &[bool],
+    ) -> VistioResult<()> {
+        self.init_with_material_tier3(mesh, topology, config, properties, model, pinned)
     }
 }
 
@@ -455,8 +480,24 @@ impl SolverStrategy for ProjectiveDynamicsSolver {
     }
 }
 
+pub trait IpcCollisionHandler {
+    fn detect_contacts(&mut self, pos_x: &[f32], pos_y: &[f32], pos_z: &[f32]) -> IpcBarrierForces;
+    fn compute_ccd_step(&mut self, prev_x: &[f32], prev_y: &[f32], prev_z: &[f32], new_x: &[f32], new_y: &[f32], new_z: &[f32]) -> f32;
+}
+
+pub struct EmptyIpcHandler;
+impl IpcCollisionHandler for EmptyIpcHandler {
+    fn detect_contacts(&mut self, px: &[f32], _py: &[f32], _pz: &[f32]) -> IpcBarrierForces {
+        IpcBarrierForces::empty(px.len())
+    }
+    fn compute_ccd_step(&mut self, _px: &[f32], _py: &[f32], _pz: &[f32], _nx: &[f32], _ny: &[f32], _nz: &[f32]) -> f32 {
+        1.0
+    }
+}
+
 impl ProjectiveDynamicsSolver {
     /// Build the bending RHS enum from optional targets, referencing internal bending data.
+    #[allow(clippy::manual_map)]
     fn build_bending_rhs<'a>(
         &'a self,
         targets: Option<&'a [(f32, f32, f32, f32)]>,
@@ -474,6 +515,442 @@ impl ProjectiveDynamicsSolver {
             })
         } else {
             None
+        }
+    }
+
+    /// Advance one timestep with IPC barrier contact using Augmented Lagrangian.
+    ///
+    /// This is the Tier 4 solver step. It wraps the standard PD local-global
+    /// loop inside an outer AL loop that enforces contact constraints:
+    ///
+    /// ```text
+    /// for al_iter in 0..al_max_iterations:
+    ///     barrier_forces = detect_and_compute_forces(positions)
+    ///     for pd_iter in 0..max_iterations:
+    ///         local_step(positions)
+    ///         rhs = assemble_rhs(pred, projections, bending)
+    ///         rhs += -(mu * barrier_grad + lambda)   // IPC forces
+    ///         positions = solve(A, rhs)
+    ///     lambda += mu * constraint_violation
+    ///     if ||constraint_violation|| < tolerance: break
+    ///     else: mu *= growth_factor
+    /// ```
+    ///
+    /// # Arguments
+    /// * `state` — Mutable simulation state
+    /// * `dt` — Timestep
+    /// * `detect_contacts` — Callback that detects contacts from current positions
+    ///   and returns `(barrier_grad_x, barrier_grad_y, barrier_grad_z, max_violation)`.
+    ///   The caller uses `IpcContactSet` from `vistio-contact` to compute these.
+    /// Advance the simulation by `dt` using Tier 4 Augmented Lagrangian for IPC contacts.
+    pub fn step_with_ipc<H: IpcCollisionHandler>(
+        &mut self,
+        state: &mut SimulationState,
+        dt: f32,
+        handler: &mut H,
+    ) -> VistioResult<StepResult>
+    {
+        if !self.initialized {
+            return Err(vistio_types::VistioError::InvalidConfig(
+                "Solver not initialized. Call init() first.".into(),
+            ));
+        }
+
+        let start = Instant::now();
+        let elements = self.elements.as_ref().unwrap();
+        let n = self.n;
+
+        // 1. Save previous positions
+        state.save_previous();
+
+        // 2. Predict: q_pred = pos + dt*vel + dt²*gravity
+        state.predict(dt, self.config.gravity);
+
+        // 3. Initialize current positions from predictions
+        state.pos_x.copy_from_slice(&state.pred_x);
+        state.pos_y.copy_from_slice(&state.pred_y);
+        state.pos_z.copy_from_slice(&state.pred_z);
+
+        // Buffers
+        let mut sol_x = vec![0.0_f32; n];
+        let mut sol_y = vec![0.0_f32; n];
+        let mut sol_z = vec![0.0_f32; n];
+
+        // Augmented Lagrangian state
+        let mut lambda_x = vec![0.0_f32; n];
+        let mut lambda_y = vec![0.0_f32; n];
+        let mut lambda_z = vec![0.0_f32; n];
+        let mut mu = self.config.al_mu_initial;
+
+        let mut total_iterations = 0_u32;
+        let mut final_residual = f64::MAX;
+        let mut al_converged = false;
+
+        let mut updated_forces = IpcBarrierForces::empty(n);
+
+        // ════════════════════════════════════════════════════════════
+        // OUTER LOOP: Augmented Lagrangian
+        // ════════════════════════════════════════════════════════════
+        for _al_iter in 0..self.config.al_max_iterations {
+            // Detect contacts and compute barrier gradient from current positions
+            let barrier_forces_init = handler.detect_contacts(
+                &state.pos_x, &state.pos_y, &state.pos_z,
+            );
+            let barrier_forces = barrier_forces_init;
+
+            let mut pd_max_disp_sq = 0.0_f32;
+
+            // ════════════════════════════════════════════════════════
+            // INNER LOOP: PD local-global iterations
+            // ════════════════════════════════════════════════════════
+            for _iter in 0..self.config.max_iterations {
+
+                // === LOCAL STEP: MEMBRANE ===
+                let mut proj_x = Vec::with_capacity(elements.len());
+                let mut proj_y = Vec::with_capacity(elements.len());
+                let mut proj_z = Vec::with_capacity(elements.len());
+
+                for elem in &elements.elements {
+                    let (p0, p1, p2) = if let Some(ref model) = self.material_model {
+                        elements.project_with_model(
+                            elem,
+                            &state.pos_x,
+                            &state.pos_y,
+                            &state.pos_z,
+                            model.as_ref(),
+                        )
+                    } else {
+                        elements.project(
+                            elem,
+                            &state.pos_x,
+                            &state.pos_y,
+                            &state.pos_z,
+                        )
+                    };
+                    proj_x.push((p0.x, p1.x, p2.x));
+                    proj_y.push((p0.y, p1.y, p2.y));
+                    proj_z.push((p0.z, p1.z, p2.z));
+                }
+
+                // === LOCAL STEP: BENDING ===
+                let (bend_targets_x, bend_targets_y, bend_targets_z) =
+                    if let Some(ref ds_bend) = self.ds_bending {
+                        let mut btx = Vec::with_capacity(ds_bend.len());
+                        let mut bty = Vec::with_capacity(ds_bend.len());
+                        let mut btz = Vec::with_capacity(ds_bend.len());
+
+                        for elem in &ds_bend.elements {
+                            let (p_v0, p_v1, p_wa, p_wb) = ds_bend.project(
+                                elem,
+                                &state.pos_x,
+                                &state.pos_y,
+                                &state.pos_z,
+                            );
+                            btx.push((p_v0.x, p_v1.x, p_wa.x, p_wb.x));
+                            bty.push((p_v0.y, p_v1.y, p_wa.y, p_wb.y));
+                            btz.push((p_v0.z, p_v1.z, p_wa.z, p_wb.z));
+                        }
+
+                        (Some(btx), Some(bty), Some(btz))
+                    } else if let Some(ref bending) = self.bending {
+                        let mut btx = Vec::with_capacity(bending.len());
+                        let mut bty = Vec::with_capacity(bending.len());
+                        let mut btz = Vec::with_capacity(bending.len());
+
+                        for elem in &bending.elements {
+                            let (p_v0, p_v1, p_wa, p_wb) = bending.project(
+                                elem,
+                                &state.pos_x,
+                                &state.pos_y,
+                                &state.pos_z,
+                            );
+                            btx.push((p_v0.x, p_v1.x, p_wa.x, p_wb.x));
+                            bty.push((p_v0.y, p_v1.y, p_wa.y, p_wb.y));
+                            btz.push((p_v0.z, p_v1.z, p_wa.z, p_wb.z));
+                        }
+
+                        (Some(btx), Some(bty), Some(btz))
+                    } else {
+                        (None, None, None)
+                    };
+
+                // === GLOBAL STEP ===
+                let bending_rhs_x = self.build_bending_rhs(
+                    bend_targets_x.as_deref(),
+                );
+                let bending_rhs_y = self.build_bending_rhs(
+                    bend_targets_y.as_deref(),
+                );
+                let bending_rhs_z = self.build_bending_rhs(
+                    bend_targets_z.as_deref(),
+                );
+
+                let mut rhs_x = assemble_rhs(
+                    n, &self.mass, dt, &state.pred_x, &proj_x, elements, 0, bending_rhs_x,
+                );
+                let mut rhs_y = assemble_rhs(
+                    n, &self.mass, dt, &state.pred_y, &proj_y, elements, 1, bending_rhs_y,
+                );
+                let mut rhs_z = assemble_rhs(
+                    n, &self.mass, dt, &state.pred_z, &proj_z, elements, 2, bending_rhs_z,
+                );
+
+                // === IPC BARRIER FORCES ===
+                // Add barrier gradient + AL multiplier contributions to RHS
+                assemble_barrier_rhs(
+                    &mut rhs_x, &barrier_forces.grad_x, &lambda_x, mu,
+                );
+                assemble_barrier_rhs(
+                    &mut rhs_y, &barrier_forces.grad_y, &lambda_y, mu,
+                );
+                assemble_barrier_rhs(
+                    &mut rhs_z, &barrier_forces.grad_z, &lambda_z, mu,
+                );
+
+                // Solve A * q = rhs
+                self.solver.solve(&rhs_x, &mut sol_x).map_err(|e| {
+                    vistio_types::VistioError::InvalidConfig(format!("X solve failed: {e}"))
+                })?;
+                self.solver.solve(&rhs_y, &mut sol_y).map_err(|e| {
+                    vistio_types::VistioError::InvalidConfig(format!("Y solve failed: {e}"))
+                })?;
+                self.solver.solve(&rhs_z, &mut sol_z).map_err(|e| {
+                    vistio_types::VistioError::InvalidConfig(format!("Z solve failed: {e}"))
+                })?;
+
+                // Compute convergence
+                let mut diff_sq = 0.0_f64;
+                let mut norm_sq = 0.0_f64;
+                for i in 0..n {
+                    let dx = (sol_x[i] - state.pos_x[i]) as f64;
+                    let dy = (sol_y[i] - state.pos_y[i]) as f64;
+                    let dz = (sol_z[i] - state.pos_z[i]) as f64;
+                    diff_sq += dx * dx + dy * dy + dz * dz;
+
+                    let ox = state.pos_x[i] as f64;
+                    let oy = state.pos_y[i] as f64;
+                    let oz = state.pos_z[i] as f64;
+                    norm_sq += ox * ox + oy * oy + oz * oz;
+                }
+
+                final_residual = if norm_sq > 1e-12 {
+                    (diff_sq / norm_sq).sqrt()
+                } else {
+                    diff_sq.sqrt()
+                };
+
+                // === AL LINE SEARCH & CCD STEP SIZE ===
+                // Instead of jumping directly to sol, treat sol - pos as descent direction.
+                let mut max_alpha = handler.compute_ccd_step(
+                    &state.pos_x, &state.pos_y, &state.pos_z,
+                    &sol_x, &sol_y, &sol_z,
+                );
+                if max_alpha < 1.0 { max_alpha *= 0.8; } // Safe margin
+                max_alpha = max_alpha.min(1.0);
+
+
+                let mut current_max_disp_sq = 0.0_f32;
+
+                // Update positions with CCD limiting
+                for i in 0..n {
+                    if state.inv_mass[i] > 0.0 {
+                        let dx = max_alpha * (sol_x[i] - state.pos_x[i]);
+                        let dy = max_alpha * (sol_y[i] - state.pos_y[i]);
+                        let dz = max_alpha * (sol_z[i] - state.pos_z[i]);
+                        state.pos_x[i] += dx;
+                        state.pos_y[i] += dy;
+                        state.pos_z[i] += dz;
+                        let disp_sq = dx*dx + dy*dy + dz*dz;
+                        if disp_sq > current_max_disp_sq {
+                            current_max_disp_sq = disp_sq;
+                        }
+                    }
+                }
+                if current_max_disp_sq > pd_max_disp_sq {
+                    pd_max_disp_sq = current_max_disp_sq;
+                }
+
+                state.enforce_ground();
+
+                total_iterations += 1;
+
+                if final_residual < self.config.tolerance {
+                    break;
+                }
+            } // end inner PD loop
+
+            // ════════════════════════════════════════════════════════
+            // AL UPDATE: adjust Lagrange multipliers
+            // ════════════════════════════════════════════════════════
+
+            // Re-detect contacts to get updated constraint violation
+            if pd_max_disp_sq < 1e-12 {
+                // Resting contact optimization: if positions barely moved during the PD loop
+                // (e.g., resting on the floor), re-detecting contacts is redundant.
+                updated_forces = barrier_forces;
+            } else {
+                updated_forces = handler.detect_contacts(
+                    &state.pos_x, &state.pos_y, &state.pos_z,
+                );
+            }
+
+            // Update λ ← λ + μ · ∇barrier (the constraint gradient)
+            for i in 0..n {
+                lambda_x[i] += mu * updated_forces.grad_x[i];
+                lambda_y[i] += mu * updated_forces.grad_y[i];
+                lambda_z[i] += mu * updated_forces.grad_z[i];
+            }
+
+            // Check AL convergence
+            if updated_forces.max_violation < self.config.al_tolerance {
+                al_converged = true;
+                break;
+            }
+
+            // Increase penalty if constraints aren't sufficiently satisfied
+            mu *= self.config.al_mu_growth;
+        } // end outer AL loop
+
+        // AL loops finished. We have the final constraint gradients in `updated_forces`.
+        // We will do a post-stabilization velocity filter for inelasticity.
+
+        // 5. Update velocities
+        state.update_velocities(dt);
+
+        // --- Inelastic Contact Response (Velocity Filter) ---
+        // IPC barriers are purely elastic. To achieve realistic cloth draping,
+        // we apply a per-vertex velocity filter using geometric contact normals:
+        //   1. Remove the normal component of velocity (perfectly inelastic rebound)
+        //   2. Apply Coulomb friction to the tangential component
+        //   3. Apply contact-specific damping to dissipate kinetic energy
+        let mu_friction = self.config.friction_coefficient;
+        let contact_damp = self.config.contact_damping;
+        for i in 0..n {
+            if state.inv_mass[i] == 0.0 { continue; }
+            if !updated_forces.in_contact[i] { continue; }
+
+            let nx = updated_forces.contact_nx[i];
+            let ny = updated_forces.contact_ny[i];
+            let nz = updated_forces.contact_nz[i];
+
+            // Check that we have a valid normal
+            let n_len_sq = nx * nx + ny * ny + nz * nz;
+            if n_len_sq < 0.5 { continue; } // skip if normal is degenerate
+
+            // Decompose velocity into normal and tangential components
+            let v_dot_n = state.vel_x[i] * nx + state.vel_y[i] * ny + state.vel_z[i] * nz;
+
+            // Only filter if the vertex is moving INTO the contact surface (v_dot_n < 0
+            // means moving against the outward normal)
+            if v_dot_n < 0.0 {
+                // Remove the normal velocity component (perfectly inelastic)
+                state.vel_x[i] -= v_dot_n * nx;
+                state.vel_y[i] -= v_dot_n * ny;
+                state.vel_z[i] -= v_dot_n * nz;
+
+                // Coulomb friction: clamp tangential velocity
+                // |f_t| ≤ μ · |f_n|, which translates to: |v_t_new| ≤ |v_t| - μ·|v_n|
+                let vt_x = state.vel_x[i] - (state.vel_x[i] * nx + state.vel_y[i] * ny + state.vel_z[i] * nz) * nx;
+                let vt_y = state.vel_y[i] - (state.vel_x[i] * nx + state.vel_y[i] * ny + state.vel_z[i] * nz) * ny;
+                let vt_z = state.vel_z[i] - (state.vel_x[i] * nx + state.vel_y[i] * ny + state.vel_z[i] * nz) * nz;
+                let vt_mag = (vt_x * vt_x + vt_y * vt_y + vt_z * vt_z).sqrt();
+                let v_n_mag = (-v_dot_n).abs();
+
+                if vt_mag > 1e-8 {
+                    // Friction reduces tangential velocity by μ·|v_n|
+                    let friction_impulse = mu_friction * v_n_mag;
+                    if friction_impulse >= vt_mag {
+                        // Static friction: tangential velocity goes to zero
+                        state.vel_x[i] -= vt_x;
+                        state.vel_y[i] -= vt_y;
+                        state.vel_z[i] -= vt_z;
+                    } else {
+                        // Kinetic friction: reduce tangential velocity proportionally
+                        let scale = 1.0 - friction_impulse / vt_mag;
+                        state.vel_x[i] = vt_x * scale;
+                        state.vel_y[i] = vt_y * scale;
+                        state.vel_z[i] = vt_z * scale;
+                    }
+                }
+            }
+
+            // Apply contact-aware damping to vertices in contact.
+            // This dissipates remaining kinetic energy for settling.
+            state.vel_x[i] *= 1.0 - contact_damp;
+            state.vel_y[i] *= 1.0 - contact_damp;
+            state.vel_z[i] *= 1.0 - contact_damp;
+        }
+
+        state.enforce_ground_velocities();
+
+        // 6. Damping
+        state.damp_velocities(self.config.damping);
+
+        if self.config.rayleigh_mass_damping > 0.0 {
+            let factor = 1.0 / (1.0 + self.config.rayleigh_mass_damping * dt);
+            for i in 0..n {
+                if state.inv_mass[i] > 0.0 {
+                    state.vel_x[i] *= factor;
+                    state.vel_y[i] *= factor;
+                    state.vel_z[i] *= factor;
+                }
+            }
+        }
+
+        let wall_time = start.elapsed().as_secs_f64();
+
+        Ok(StepResult {
+            iterations: total_iterations,
+            final_residual,
+            converged: al_converged || final_residual < self.config.tolerance,
+            wall_time,
+        })
+    }
+}
+
+/// Barrier force data passed from the contact detection system into the solver.
+///
+/// Computed by the caller using `IpcContactSet::compute_barrier_gradient()`.
+/// Barrier forces computed by the contact detection system
+/// and passed back into the solver's Augmented Lagrangian loop.
+#[derive(Debug, Clone)]
+pub struct IpcBarrierForces {
+    /// Gradient of the barrier energy w.r.t vertex x-coordinates
+    pub grad_x: Vec<f32>,
+    /// Gradient of the barrier energy w.r.t vertex y-coordinates
+    pub grad_y: Vec<f32>,
+    /// Gradient of the barrier energy w.r.t vertex z-coordinates
+    pub grad_z: Vec<f32>,
+    /// Maximum constraint violation across all active contacts
+    pub max_violation: f32,
+    /// Number of active IPC contacts pushing on the system
+    pub active_contacts: usize,
+
+    // ─── Per-vertex contact information for velocity filter ───
+
+    /// Per-vertex contact normal (x component). Normalized.
+    /// Zero for vertices not in contact.
+    pub contact_nx: Vec<f32>,
+    /// Per-vertex contact normal (y component). Normalized.
+    pub contact_ny: Vec<f32>,
+    /// Per-vertex contact normal (z component). Normalized.
+    pub contact_nz: Vec<f32>,
+    /// Whether each vertex is currently in contact with any collider.
+    pub in_contact: Vec<bool>,
+}
+
+impl IpcBarrierForces {
+    pub fn empty(n_vertices: usize) -> Self {
+        Self {
+            grad_x: vec![0.0; n_vertices],
+            grad_y: vec![0.0; n_vertices],
+            grad_z: vec![0.0; n_vertices],
+            max_violation: 0.0,
+            active_contacts: 0,
+            contact_nx: vec![0.0; n_vertices],
+            contact_ny: vec![0.0; n_vertices],
+            contact_nz: vec![0.0; n_vertices],
+            in_contact: vec![false; n_vertices],
         }
     }
 }

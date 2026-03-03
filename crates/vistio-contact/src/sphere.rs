@@ -97,4 +97,113 @@ impl SphereCollider {
             total_force_magnitude: total_force,
         }
     }
+
+    /// Compute IPC barrier gradients for vertices near the sphere.
+    pub fn detect_ipc_contacts(
+        &self,
+        pos_x: &[f32],
+        pos_y: &[f32],
+        pos_z: &[f32],
+        d_hat: f32,
+        kappa: f32,
+        grad_x: &mut [f32],
+        grad_y: &mut [f32],
+        grad_z: &mut [f32],
+    ) -> (usize, f32) {
+        let mut active = 0;
+        let mut max_violation = 0.0_f32;
+
+        for i in 0..pos_x.len() {
+            let dx = pos_x[i] - self.center.x;
+            let dy = pos_y[i] - self.center.y;
+            let dz = pos_z[i] - self.center.z;
+
+            let r = (dx * dx + dy * dy + dz * dz).sqrt();
+            let d_surface = r - self.radius;
+
+            if d_surface <= 0.0 {
+                // Inside the sphere -> violation!
+                max_violation = max_violation.max(-d_surface);
+
+                // Use a meaningful clamped distance so the chain-rule factor
+                // 2·d_clamped produces a real restoring force, not ≈0.
+                let d_clamped = 1e-4_f32;
+                let dist_sq = d_clamped * d_clamped;
+                active += 1;
+                let barrier_grad = crate::barrier::scaled_barrier_gradient(dist_sq, d_hat, kappa);
+
+                if r > 1e-6 {
+                    // Push outward along the radial direction
+                    let factor = barrier_grad * 2.0 * d_clamped;
+                    grad_x[i] += factor * (dx / r);
+                    grad_y[i] += factor * (dy / r);
+                    grad_z[i] += factor * (dz / r);
+                } else {
+                    // Dead center, push randomly (up)
+                    grad_y[i] += barrier_grad * 2.0 * d_clamped;
+                }
+            } else {
+                let dist_sq = d_surface * d_surface;
+                if dist_sq < d_hat {
+                    active += 1;
+                    let barrier_grad = crate::barrier::scaled_barrier_gradient(dist_sq, d_hat, kappa);
+
+                    let factor = barrier_grad * 2.0 * d_surface;
+                    grad_x[i] += factor * (dx / r);
+                    grad_y[i] += factor * (dy / r);
+                    grad_z[i] += factor * (dz / r);
+                }
+            }
+        }
+        (active, max_violation)
+    }
+
+    /// Compute maximum safe step size to prevent vertices from entering the sphere.
+    pub fn compute_ccd_step(
+        &self,
+        prev_x: &[f32], prev_y: &[f32], prev_z: &[f32],
+        new_x: &[f32], new_y: &[f32], new_z: &[f32],
+    ) -> f32 {
+        let mut min_toi: f32 = 1.0;
+        let r2 = self.radius * self.radius;
+
+        for i in 0..prev_x.len() {
+            let px0 = prev_x[i] - self.center.x;
+            let py0 = prev_y[i] - self.center.y;
+            let pz0 = prev_z[i] - self.center.z;
+
+            let px1 = new_x[i] - self.center.x;
+            let py1 = new_y[i] - self.center.y;
+            let pz1 = new_z[i] - self.center.z;
+
+            // Check if vertex STARTS inside the sphere
+            let start_dist_sq = px0 * px0 + py0 * py0 + pz0 * pz0;
+            if start_dist_sq < r2 {
+                // Already penetrating — barrier forces will push out.
+                // Do NOT stall CCD for all vertices; skip this one.
+                continue;
+            }
+
+            let vx = px1 - px0;
+            let vy = py1 - py0;
+            let vz = pz1 - pz0;
+
+            // (px0 + t*vx)^2 + (py0 + t*vy)^2 + (pz0 + t*vz)^2 = r^2
+            let a = vx * vx + vy * vy + vz * vz;
+            let b = 2.0 * (px0 * vx + py0 * vy + pz0 * vz);
+            let c = px0 * px0 + py0 * py0 + pz0 * pz0 - r2;
+
+            if a > 1e-8 {
+                let disc = b * b - 4.0 * a * c;
+                if disc >= 0.0 {
+                    // Smallest positive root is the entry time
+                    let t = (-b - disc.sqrt()) / (2.0 * a);
+                    if (0.0..=1.0).contains(&t) {
+                        min_toi = min_toi.min(t * 0.9);
+                    }
+                }
+            }
+        }
+        min_toi.max(1e-6)
+    }
 }

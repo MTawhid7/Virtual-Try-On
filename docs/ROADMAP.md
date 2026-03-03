@@ -27,6 +27,7 @@ $$(\mathbf{M} - h^2 \frac{\partial \mathbf{f}}{\partial \mathbf{x}} - h \frac{\p
 Where $\mathbf{M}$ is the mass matrix, $\mathbf{f}$ is the total force vector, and $h$ is the timestep. The left-hand matrix is the *system matrix* — a large, sparse, symmetric positive-definite (SPD) matrix that changes every timestep because $\frac{\partial \mathbf{f}}{\partial \mathbf{x}}$ (the stiffness Jacobian) depends on the current deformation state.
 
 **Solving the system:** The system is solved using preconditioned Conjugate Gradient (PCG). The quality of the preconditioner determines performance:
+
 - **Diagonal (Jacobi):** Trivial, but poor convergence for stiff problems.
 - **Incomplete Cholesky (IC):** Good convergence, moderate setup cost, hard to parallelize.
 - **Algebraic Multigrid (AMG):** Excellent convergence, high setup cost, GPU implementations exist.
@@ -75,6 +76,7 @@ Where $\mathbf{M}$ is the mass matrix, $\mathbf{f}$ is the total force vector, a
 **Lineage:** Bouaziz et al. 2014 → Subspace PD (2023) → Domain-Decomposed PD (SIGGRAPH 2025)
 
 **Principle:** Reformulate implicit Euler as an alternating minimization. Split the energy into a *global* quadratic term (mass + inertia) and *local* per-element terms (constitutive model). Alternate between:
+
 1. **Local step:** Project each element to its closest valid configuration. Embarrassingly parallel — identical to PBD.
 2. **Global step:** Solve a single global quadratic system. The system matrix $\mathbf{A} = \mathbf{M}/h^2 + \sum_i \mathbf{S}_i^T \mathbf{S}_i$ depends only on topology and masses — **not on deformation state.** It can be prefactored once.
 
@@ -87,6 +89,7 @@ PD gives you the *convergence properties* of an implicit solver (global informat
 **Recent Breakthrough — Domain-Decomposed PD (SIGGRAPH 2025):**
 
 This paper partitions the garment mesh into overlapping subdomains, prefactors each subdomain independently, and uses additive Schwarz iteration to converge the global solution. Key results:
+
 - **CPU-only performance matching GPU methods.** The authors report performance comparable to state-of-the-art GPU methods on multi-core CPUs.
 - **Near-linear scaling** with core count.
 - **Applicable to your deployment model.** If you deploy as a service, you control the hardware. Multi-core CPU instances are cheaper and more available than GPU instances.
@@ -106,6 +109,7 @@ IPC reformulates contact handling as an energy minimization problem using logari
 $$b(d) = -(d - \hat{d})^2 \ln(d / \hat{d})$$
 
 where $d$ is the distance between two primitives and $\hat{d}$ is the contact threshold. This barrier:
+
 - Goes to $+\infty$ as $d \to 0$ (prevents interpenetration mathematically)
 - Is $C^2$ continuous (smooth gradients for the optimizer)
 - Has compact support (zero cost when primitives are far apart)
@@ -117,6 +121,7 @@ where $d$ is the distance between two primitives and $\hat{d}$ is the contact th
 **Paper:** Li, Kaufman, Jiang 2021 (SIGGRAPH)
 
 C-IPC extends IPC to codimensional objects (shells, rods, particles). For cloth specifically:
+
 - **Strain limiting as energy.** A $C^2$ cubic barrier enforces maximum stretch as an inequality constraint, eliminating the need for separate strain-limiting passes.
 - **Thickness-aware contact.** Enforces minimum separation between mid-surfaces, capturing the physical thickness of fabric without inflating the mesh.
 - **Additive CCD.** A new continuous collision detection method specifically designed for thin materials, where standard CCD can produce false negatives.
@@ -128,6 +133,7 @@ C-IPC extends IPC to codimensional objects (shells, rods, particles). For cloth 
 This paper introduces a fundamentally different barrier concept: instead of measuring the Euclidean *distance* between primitives, it tracks the *virtual lifespan* of a collision event — how long a collision has been active. The barrier is computed based on this lifespan rather than geometric proximity.
 
 **Key advantages:**
+
 - **No CCD required per iteration.** CCD is the bottleneck of traditional IPC. Non-distance barriers avoid it entirely during the solve, only using CCD for line search.
 - **GPU-native.** The non-distance barrier evaluation is fully parallelizable.
 - **10× faster** than optimized IPC implementations while maintaining intersection-free guarantees.
@@ -139,6 +145,7 @@ Combined with **subspace reuse** — maintaining a coarse subspace decomposition
 **Paper:** "StiffGIPC: Advancing GPU IPC for Stiff Affine-Deformable Simulation"
 
 Co-authored by Minchen Li, this extends GPU IPC to handle stiff materials. Key innovations:
+
 - **Connectivity-enhanced Multilevel Additive Schwarz preconditioner** on GPU — the first GPU-native preconditioner that respects mesh topology for better convergence on stiff systems.
 - **$C^2$ cubic strain energy** for strain limiting in stiff membranes (directly applicable to cloth).
 - **10× faster** than previous GPU IPC methods on stiff material benchmarks.
@@ -154,6 +161,7 @@ Fixed-resolution meshes are fundamentally limited. A 10,000-vertex shirt cannot 
 **Paper:** Narain, Samii, O'Brien 2012 (SIGGRAPH Asia)
 
 ARCSim defines a **sizing field** — a metric tensor at each point on the surface — that specifies the target edge length in each direction. This tensor is computed from:
+
 - **Surface curvature:** Smaller triangles in highly curved regions (wrinkles, folds).
 - **Velocity gradient:** Smaller triangles where the surface is deforming rapidly (anticipates wrinkle formation).
 
@@ -166,6 +174,7 @@ The mesh is refined (edge splits), coarsened (edge collapses), and improved (edg
 **Paper:** Zhang, James, Kaufman (Adobe Research)
 
 Progressive Dynamics takes a *different* approach to multi-resolution. Instead of adaptive remeshing during simulation, it:
+
 1. Simulates on a **coarse mesh** first (fast, predictive preview).
 2. **Prolongs** (upsamples) the coarse solution onto a finer mesh.
 3. Uses the prolonged result as initialization for a **fine simulation**.
@@ -177,6 +186,7 @@ The coarse simulation produces consistent previews at low cost. The fine simulat
 #### 3.3 Volumetric Homogenization for Knitwear (SIGGRAPH Asia 2024)
 
 This paper addresses knitted fabrics, which have fundamentally different mechanics from woven fabrics. Instead of simulating individual yarns (computationally intractable), it:
+
 1. Simulates small yarn-level patches.
 2. Homogenizes their behavior into a spatially varying continuum model.
 3. Uses a novel **domain-decomposed subspace solver** on GPU, within the Projective Dynamics framework.
@@ -232,24 +242,28 @@ graph TB
 #### 4.2 CLO3D / Marvelous Designer
 
 CLO3D shares CLO Virtual Fashion's proprietary solver. In 2024:
+
 - **GPU simulation accuracy now matches CPU** (the fact this was a 2024 achievement implies they had different solver paths).
 - **Soft-body simulation** for avatars.
 - **Animation-stable GPU simulation** — stable enough for recording garment motion sequences.
 - **NVIDIA-only GPU acceleration.**
 
 CLO3D's solver is likely an implicit integration scheme (not PBD) based on:
+
 - Their ability to match CPU and GPU results exactly (PBD is iteration-order-dependent, making GPU/CPU parity hard).
 - Their "animation stable" qualifier — implicit methods are unconditionally stable by construction.
 
 #### 4.3 Houdini Vellum
 
 Houdini Vellum is the most transparent production solver:
+
 - **XPBD core** with OpenCL GPU acceleration for constraints.
 - **C++ collision handler** — collision is not on the GPU.
 - **VEX scripting** for custom material logic — users can define custom constraint behavior.
 - **Micro-solver architecture** — each system (integration, constraints, collision, post-processing) is a separate composable node.
 
 Vellum demonstrates that XPBD *can* reach production quality for VFX, but it relies on:
+
 - Very high iteration counts (often 100+)
 - Sophisticated constraint architectures (long-range attachments, anisotropic bending, buckle stiffness)
 - The full power of SideFX's collision engine
@@ -280,6 +294,7 @@ Differentiable simulation is the emerging paradigm that connects physics simulat
 **Implications for Vestra V2:**
 
 Differentiable simulation is the path to *automatic material calibration.* Instead of manually tuning fabric parameters, you could:
+
 1. Film a real fabric swatch draping over a sphere.
 2. Run the differentiable solver backward to find the material parameters that reproduce the observed draping.
 3. Store those parameters in a material database.
@@ -338,17 +353,17 @@ Synthesizing all available information, the Style3D architecture almost certainl
 
 ### The Contact System
 
-4. **IPC-class barrier method** (or an equivalent proprietary barrier approach). The evidence: their claim of zero interpenetration, the stability under multi-layer garment scenarios, the soft-body avatar deformation.
+1. **IPC-class barrier method** (or an equivalent proprietary barrier approach). The evidence: their claim of zero interpenetration, the stability under multi-layer garment scenarios, the soft-body avatar deformation.
 
-5. **Deformable body collision.** The avatar body is not rigid — it deforms slightly under garment pressure. This is essential for tight-fitting garments (jeans, leggings) where the body surface needs to yield slightly to prevent unphysical contact artifacts.
+2. **Deformable body collision.** The avatar body is not rigid — it deforms slightly under garment pressure. This is essential for tight-fitting garments (jeans, leggings) where the body surface needs to yield slightly to prevent unphysical contact artifacts.
 
 ### The Mesh Management
 
-6. **Adaptive meshing** that reduces polygon count by ~40% in flat regions while increasing it in wrinkled regions. The evidence: their published "up to 40% polygon reduction" claim, the visual quality of wrinkle details.
+1. **Adaptive meshing** that reduces polygon count by ~40% in flat regions while increasing it in wrinkled regions. The evidence: their published "up to 40% polygon reduction" claim, the visual quality of wrinkle details.
 
 ### The Material System
 
-7. **Calibrated against real fabric tests.** The "95% accuracy" claim is meaningless without a physical reference. They almost certainly have a Kawabata-derived or equivalent material database. Their "extensive and professional fabric presets" confirm this.
+1. **Calibrated against real fabric tests.** The "95% accuracy" claim is meaningless without a physical reference. They almost certainly have a Kawabata-derived or equivalent material database. Their "extensive and professional fabric presets" confirm this.
 
 ### What Would It Take to Match or Surpass Style3D?
 
@@ -383,6 +398,7 @@ Synthesizing all available information, the Style3D architecture almost certainl
 **Goal:** Define the I/O boundary and validation infrastructure before writing any solver code.
 
 **Deliverables:**
+
 - **Simulation Interface:** Define the input/output contract. Input: body mesh + garment mesh + material parameters + gravity/boundary conditions. Output: final draped garment mesh + per-vertex metadata (strain, contact forces).
 - **Benchmark Suite:** Implement the three canonical drape tests from the cloth simulation literature:
   - **Hanging Cloth:** A square cloth pinned at two corners. Validates gravity + distance constraints.
@@ -416,6 +432,7 @@ Synthesizing all available information, the Style3D architecture almost certainl
 **Goal:** Replace the XPBD constraint loop with a Projective Dynamics local-global solver. Prove that PD delivers higher quality than XPBD at equivalent iterations.
 
 **What changes:**
+
 - **Integration:** Backward Euler formulated as PD local-global.
 - **Membrane model:** Linear elasticity (St. Venant-Kirchhoff). Simple, fast, good enough for initial validation.
 - **Bending model:** Dihedral angle springs (same as Vestra V1 initially — upgrade in Tier 3).
@@ -424,15 +441,18 @@ Synthesizing all available information, the Style3D architecture almost certainl
 - **Self-collision:** Same as V1 (spatial hash + graph-colored resolution).
 
 **What stays the same from V1:**
+
 - Spatial hash data structures
 - Graph coloring for self-collision
 - Basic collision response logic
 
 **Expected outcome:**
+
 - **Quality:** Noticeably stiffer fabric at fewer iterations. Where V1 needed 48 constraint solves (6 substeps × 8 iterations), PD should achieve equivalent or better stiffness with 10-15 PD iterations — because each PD iteration propagates information globally through the prefactored system.
 - **Performance:** Slower per-iteration (due to global solve), but fewer iterations needed. Net performance approximately equal to V1 on the same mesh.
 
 **Validation:**
+
 - Run the Hanging Cloth benchmark with both V1 (XPBD) and Tier 1 (PD) at matched iteration counts. PD should produce less vertical elongation (lower stretch error).
 - Measure energy conservation. PD should show less artificial damping.
 
@@ -445,6 +465,7 @@ Synthesizing all available information, the Style3D architecture almost certainl
 **Goal:** Replace the linear elasticity with co-rotational FEM, allowing the solver to handle large rotations (which are ubiquitous in cloth deformation — every fold is a large rotation).
 
 **What changes:**
+
 - **Per-triangle computation:** Compute the deformation gradient $\mathbf{F}$ for each triangle relative to its rest state. Perform a polar decomposition $\mathbf{F} = \mathbf{R}\mathbf{S}$ to extract the rotation $\mathbf{R}$. Apply linear elasticity in the rotated frame.
 - **Local step update:** The PD local step now projects each triangle to its closest co-rotated configuration instead of its rest state.
 - **Anisotropy preparation:** Structure the constitutive model to accept a per-triangle material tensor (identity for now; will be populated with warp/weft data in Tier 3).
@@ -452,10 +473,12 @@ Synthesizing all available information, the Style3D architecture almost certainl
 **What stays the same:** Global solve prefactoring, collision, self-collision.
 
 **Expected outcome:**
+
 - **Quality:** Dramatically improved fold behavior. Linear elasticity produces energy artifacts when triangles rotate significantly (folded cloth). Co-rotational eliminates these artifacts.
 - **Performance:** Marginal increase per iteration (polar decomposition per triangle). Still far less than rebuilding a full stiffness matrix.
 
 **Validation:**
+
 - Self-Fold benchmark: The fold line should be crisp and stable. With linear elasticity, it tends to be soft or oscillatory.
 - Compare fold shapes against ARCSim reference images from the 2012 paper.
 
@@ -468,10 +491,12 @@ Synthesizing all available information, the Style3D architecture almost certainl
 **What changes:**
 
 **Bending:**
+
 - Replace dihedral-angle springs with **Discrete Shells** (Grinspun et al. 2003). This formulates bending energy in terms of the *curvature difference* between current and rest configurations, not the angle difference.
 - Curvature-based bending is essential for realistic fold behavior: folds are sharper where the curvature is high (edges, creases) and smoother where it's low (broad drapes).
 
 **Anisotropy:**
+
 - Implement a **warp/weft material tensor** aligned to the garment's UV coordinates. This encodes different stiffness along the warp (vertical) and weft (horizontal) yarn directions.
 - Map KES-FB1 tensile measurements to the warp/weft stiffness components.
 - Map KES-FB2 bending rigidity to the discrete shell bending stiffness, separately for warp and weft directions.
@@ -488,10 +513,12 @@ Create an initial material library from published fabric data:
 | Chiffon | 50 g/m² | Low / Low | Very Low | 0.2 |
 
 **Expected outcome:**
+
 - Cotton should drape differently from silk. Denim should hold its shape; chiffon should flow.
 - Bias-cut garments (45° to the grain) should stretch more than straight-grain garments — a classic test of anisotropic behavior.
 
 **Validation:**
+
 - Compare simulated drape profiles against published KES-correlated drape test data.
 - Visual comparison: silk vs. denim drape on the same garment shape.
 
@@ -506,29 +533,34 @@ This is the most technically challenging tier. There are two implementation path
 **Path A: Non-Distance Barriers (SIGGRAPH Asia 2024)**
 
 Advantages:
+
 - GPU-native design
 - No per-iteration CCD (only for line search)
 - 10× faster than standard IPC
 - Designed specifically for cloth
 
 Disadvantages:
+
 - Very recent paper — fewer reference implementations
 - Requires integrating a line-search mechanism into the PD solver
 
 **Path B: Classical IPC with C-IPC Extensions**
 
 Advantages:
+
 - More mature, better documented
 - Reference implementations available
 - Battle-tested in production
 
 Disadvantages:
+
 - CCD per iteration is expensive
 - Harder to GPU-accelerate efficiently
 
 **Recommendation:** Start with **Path B (classical IPC)** for correctness, then optimize with non-distance barrier ideas once the contact system is validated. The IPC contact energy is an additive term — it slots into the PD framework as an additional local projection.
 
 **What changes:**
+
 - **Broad phase:** Replace spatial hash with a **Bounding Volume Hierarchy (BVH)**. BVHs provide guaranteed $O(N \log N)$ query complexity and can be built using Linear BVH (LBVH) algorithms on the GPU.
 - **Narrow phase:** Implement vertex-triangle and edge-edge distance primitives with numerically robust coplanarity checks.
 - **Barrier energy:** Add the logarithmic barrier function as an additional energy term in the PD objective.
@@ -536,14 +568,17 @@ Disadvantages:
 - **CCD for step validation:** After each solve, verify no intersections were created using swept-volume CCD.
 
 **System matrix impact:** Adding barrier forces changes the system matrix (it's no longer constant). Two options:
+
 1. **Penalty approach:** Approximate the barrier with a penalty force and absorb it into the constant system matrix. Simple but less accurate.
 2. **Augmented Lagrangian:** Treat contacts via an outer augmented Lagrangian loop around the PD inner loop. Preserves the constant system matrix. Better accuracy.
 
 **Expected outcome:**
+
 - Zero interpenetration in all benchmark scenarios, including stress tests (fast-moving body, tight garments).
 - Elimination of the "floating" and "tunneling" artifacts that plague penalty-based collision.
 
 **Validation:**
+
 - Stress test: Drop a garment onto a rapidly moving body. No vertex should ever cross the body surface.
 - Tight fit: Simulate an XS garment on an L body. The garment should compress against the body without any vertices penetrating.
 - Self-collision: Simulate a full skirt spinning. No self-intersection should occur.
@@ -557,6 +592,7 @@ Disadvantages:
 **Goal:** Port the computationally expensive per-element operations to GPU compute while keeping orchestration and topology-changing operations on CPU.
 
 **GPU-side (parallel, per-element):**
+
 - Force assembly (per-triangle FEM computation)
 - Local step projections
 - BVH traversal and narrow-phase distance computation
@@ -564,6 +600,7 @@ Disadvantages:
 - Self-collision spatial hash query + response
 
 **CPU-side (sequential, topology-aware):**
+
 - Simulation orchestration and timestep control
 - Sparse Cholesky factorization (when topology changes)
 - Cholesky backsubstitution (can also be GPU-accelerated via cuSPARSE if using CUDA)
@@ -571,15 +608,18 @@ Disadvantages:
 - Convergence checking
 
 **Technology choice:**
+
 - **wgpu (Rust):** Cross-platform (Vulkan, Metal, DX12). Write compute shaders in WGSL. No NVIDIA lock-in. This is the recommended path given the Rust codebase.
 - **CUDA (C/C++ FFI):** NVIDIA-only but maximum performance and ecosystem support (cuSPARSE, Thrust, CUB).
 
 **Data layout on GPU:**
+
 - **Structure of Arrays (SoA):** Positions as three separate `f32[]` arrays (X, Y, Z). Essential for coalesced GPU memory access.
 - **Pinned host memory:** Use pinned (page-locked) host memory for CPU-GPU transfers to minimize latency.
 - **Persistent GPU buffers:** Allocate all simulation buffers on the GPU at initialization. Only transfer the final result back to CPU.
 
 **Expected outcome:**
+
 - 5-20× speedup over CPU-only Tier 4.
 - Ability to simulate 50,000+ vertex garments at acceptable throughput for a service (< 30 seconds for a full drape).
 
@@ -608,12 +648,14 @@ Disadvantages:
 4. **System matrix refactorization:** After remeshing, rebuild and refactorize the PD system matrix. The cost is $O(N^{1.5})$ but happens only when the mesh changes (typically every 5-10 frames, or less frequently once the mesh stabilizes).
 
 **Port from ARCSim:** ARCSim's remeshing code is BSD-licensed C++. It can be:
+
 - Directly called from Rust via FFI.
 - Or ported to Rust for tighter integration.
 
 The remeshing logic is well-isolated (~2,000 lines of C++) and has been validated over a decade of use.
 
 **Expected outcome:**
+
 - Dramatic improvement in wrinkle detail without increasing average vertex count.
 - Dynamic vertex count: ~5,000 at rest → ~30,000-80,000 under heavy wrinkling.
 - Wrinkle resolution comparable to ARCSim / Style3D quality.
@@ -643,11 +685,13 @@ sequenceDiagram
 ```
 
 **Rendering pipeline:**
+
 - Use a headless PBR renderer (Filament by Google, Apache 2.0, or Blender Cycles, GPL).
 - Fabric-specific BSDF: Irawan-Marschner model for woven fabrics, capturing yarn-level scattering effects.
 - Multi-angle output: front, back, left, right, detail crop.
 
 **Production hardening:**
+
 - **Timeout & fallback:** If the simulation doesn't converge within a time limit, return the best-effort result with a quality flag.
 - **Input validation:** Reject non-manifold meshes, degenerate triangles, zero-area garments.
 - **Queue management:** Use a job queue (Redis/RabbitMQ) to handle concurrent simulation requests.
@@ -674,17 +718,20 @@ sequenceDiagram
 ## Part V — Summary: What We Build, What We Borrow, What We Defer
 
 ### Build From Scratch
+
 - Projective Dynamics solver core (Tier 1-2)
 - Anisotropic material model integration (Tier 3)
 - GPU compute kernel pipeline (Tier 5)
 - Service API and production infrastructure (Tier 7)
 
 ### Borrow / Port (BSD-Licensed)
+
 - **ARCSim adaptive remeshing** (Tier 6) — the single highest-impact borrowed component
 - **CHOLMOD/SuiteSparse** sparse Cholesky solver (Tier 1) — decades of battle-testing
 - **Tight Inclusion** CCD library (Tier 4) — provably correct collision detection
 
 ### Defer to Future Work
+
 - Soft-body avatar deformation
 - Multi-garment layering
 - Differentiable simulation for automatic material calibration
@@ -709,7 +756,7 @@ gantt
     Tier 3 - Discrete Shells + Anisotropy :t3, after t2, 6w
 
     section Contact
-    Tier 4 - IPC Barrier Contact        :t4, after t3, 8w
+    | **Tier 4** | IPC barriers, CCD, robust self-collision | ✅ Complete |    :t4, after t3, 8w
 
     section Performance
     Tier 5 - GPU Acceleration           :t5, after t4, 8w

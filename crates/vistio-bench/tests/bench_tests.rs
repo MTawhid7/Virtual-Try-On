@@ -4,6 +4,9 @@ use vistio_bench::metrics::BenchmarkMetrics;
 use vistio_bench::runner::BenchmarkRunner;
 use vistio_bench::scenarios::{Scenario, ScenarioKind};
 use vistio_solver::pd_solver::ProjectiveDynamicsSolver;
+use vistio_solver::SolverStrategy;
+use vistio_contact::{SpatialHash, VertexTriangleTest, ProjectionContactResponse};
+
 
 // ─── Scenario Tests ───────────────────────────────────────────
 
@@ -29,7 +32,7 @@ fn sphere_drape_setup() {
 
 #[test]
 fn all_scenarios() {
-    assert_eq!(ScenarioKind::all().len(), 5);
+    assert_eq!(ScenarioKind::all().len(), 6);
 }
 
 // ─── Runner Tests ─────────────────────────────────────────────
@@ -127,4 +130,148 @@ fn metrics_json_round_trip() {
     let json = serde_json::to_string(&metrics).unwrap();
     let recovered: BenchmarkMetrics = serde_json::from_str(&json).unwrap();
     assert_eq!(recovered.timesteps, 10);
+}
+
+// ─── Verification Tests (Non-Penetration) ─────────────────────
+
+#[test]
+fn verify_sphere_drape_no_penetration() {
+    let mut scenario = Scenario::sphere_drape();
+    // Run for a shorter time to keep the test fast but long enough to hit the sphere
+    scenario.timesteps = 60; // 1 second
+
+    let mut solver = ProjectiveDynamicsSolver::new();
+    let metrics = BenchmarkRunner::run(&scenario, &mut solver).unwrap();
+
+    // We can't easily assert on every single frame's state from the runner output,
+    // but we can ensure the solver completed successfully and didn't explode.
+    assert!(metrics.total_wall_time > 0.0);
+
+    // Re-run manually to check coordinates frame-by-frame
+    let mut scenario = Scenario::sphere_drape();
+    scenario.timesteps = 40;
+    let mut solver = ProjectiveDynamicsSolver::new();
+
+    let mut state = vistio_solver::state::SimulationState::from_mesh(
+        &scenario.garment,
+        scenario.vertex_mass,
+        &scenario.pinned
+    ).unwrap();
+
+    let topo = vistio_mesh::Topology::build(&scenario.garment);
+    solver.init(&scenario.garment, &topo, &scenario.config, &scenario.pinned).unwrap();
+
+    let mut pipeline = vistio_contact::collision_pipeline::CollisionPipeline::new(
+        Box::new(SpatialHash::new(0.02)),
+        Box::new(VertexTriangleTest),
+        Box::new(ProjectionContactResponse),
+        scenario.garment.clone(),
+        scenario.config.barrier_d_hat,
+        scenario.config.barrier_kappa,
+    ).with_ipc(true).with_sphere(vistio_math::Vec3::new(0.0, 0.0, 0.0), 0.3);
+
+
+
+    struct TestIpcHandler<'a> {
+        pipeline: &'a mut vistio_contact::collision_pipeline::CollisionPipeline,
+        d_hat: f32,
+        kappa: f32,
+        mesh: &'a vistio_mesh::TriangleMesh,
+    }
+    impl<'a> vistio_solver::pd_solver::IpcCollisionHandler for TestIpcHandler<'a> {
+        fn detect_contacts(&mut self, px: &[f32], py: &[f32], pz: &[f32]) -> vistio_solver::pd_solver::IpcBarrierForces {
+            self.pipeline.detect_ipc_contacts(px, py, pz, self.d_hat, self.kappa)
+        }
+        fn compute_ccd_step(&mut self, prev_x: &[f32], prev_y: &[f32], prev_z: &[f32], new_x: &[f32], new_y: &[f32], new_z: &[f32]) -> f32 {
+            self.pipeline.compute_ccd_step(&self.mesh.indices, prev_x, prev_y, prev_z, new_x, new_y, new_z)
+        }
+    }
+
+    for _ in 0..scenario.timesteps {
+        let mut handler = TestIpcHandler {
+            pipeline: &mut pipeline,
+            d_hat: scenario.config.barrier_d_hat,
+            kappa: scenario.config.barrier_kappa,
+            mesh: &scenario.garment,
+        };
+
+        let _ = solver.step_with_ipc(&mut state, scenario.dt, &mut handler).unwrap();
+        let _ = pipeline.step(&mut state).unwrap();
+
+        // Verify no vertex is inside the sphere of radius 0.3
+        for i in 0..state.vertex_count {
+            let dist = (state.pos_x[i].powi(2) + state.pos_y[i].powi(2) + state.pos_z[i].powi(2)).sqrt();
+            let threshold = 0.3_f32 - 0.01;
+            assert!(
+                dist >= threshold,
+                "Penetration detected! Vertex {} is at distance {} from origin, inside the sphere of radius {}",
+                i, dist, 0.3
+            );
+        }
+    }
+}
+
+#[test]
+fn verify_cusick_drape_no_penetration() {
+    let mut scenario = Scenario::cusick_drape();
+    scenario.timesteps = 60; // 1 second
+
+    let mut solver = ProjectiveDynamicsSolver::new();
+    let mut state = vistio_solver::state::SimulationState::from_mesh(
+        &scenario.garment,
+        scenario.vertex_mass,
+        &scenario.pinned
+    ).unwrap();
+
+    let topo = vistio_mesh::Topology::build(&scenario.garment);
+    solver.init(&scenario.garment, &topo, &scenario.config, &scenario.pinned).unwrap();
+
+    let mut pipeline = vistio_contact::collision_pipeline::CollisionPipeline::new(
+        Box::new(SpatialHash::new(0.02)),
+        Box::new(VertexTriangleTest),
+        Box::new(ProjectionContactResponse),
+        scenario.garment.clone(),
+        scenario.config.barrier_d_hat,
+        scenario.config.barrier_kappa,
+    ).with_ipc(true).with_cylinder(0.0, 0.0, 0.2, 0.18);
+
+    struct TestIpcHandler<'a> {
+        pipeline: &'a mut vistio_contact::collision_pipeline::CollisionPipeline,
+        d_hat: f32,
+        kappa: f32,
+        mesh: &'a vistio_mesh::TriangleMesh,
+    }
+    impl<'a> vistio_solver::pd_solver::IpcCollisionHandler for TestIpcHandler<'a> {
+        fn detect_contacts(&mut self, px: &[f32], py: &[f32], pz: &[f32]) -> vistio_solver::pd_solver::IpcBarrierForces {
+            self.pipeline.detect_ipc_contacts(px, py, pz, self.d_hat, self.kappa)
+        }
+        fn compute_ccd_step(&mut self, prev_x: &[f32], prev_y: &[f32], prev_z: &[f32], new_x: &[f32], new_y: &[f32], new_z: &[f32]) -> f32 {
+            self.pipeline.compute_ccd_step(&self.mesh.indices, prev_x, prev_y, prev_z, new_x, new_y, new_z)
+        }
+    }
+
+    for _ in 0..scenario.timesteps {
+        let mut handler = TestIpcHandler {
+            pipeline: &mut pipeline,
+            d_hat: scenario.config.barrier_d_hat,
+            kappa: scenario.config.barrier_kappa,
+            mesh: &scenario.garment,
+        };
+
+        let _ = solver.step_with_ipc(&mut state, scenario.dt, &mut handler).unwrap();
+        let _ = pipeline.step(&mut state).unwrap();
+
+        // Verify no vertex penetrates the cylinder (radius 0.18, top 0.2)
+        for i in 0..state.vertex_count {
+            if state.pos_y[i] < 0.2 {
+                let dist = (state.pos_x[i].powi(2) + state.pos_z[i].powi(2)).sqrt();
+                let threshold = 0.18_f32 - 0.01;
+                assert!(
+                    dist >= threshold,
+                    "Penetration detected! Vertex {} is at distance {} from central axis, inside the cylinder of radius {}",
+                    i, dist, 0.18
+                );
+            }
+        }
+    }
 }

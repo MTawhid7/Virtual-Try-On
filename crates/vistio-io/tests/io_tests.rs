@@ -10,7 +10,7 @@ use vistio_mesh::generators::{quad_grid, uv_sphere};
 fn default_params() {
     let params = SimulationParams::default();
     assert!((params.gravity - 9.81).abs() < 1e-3);
-    assert_eq!(params.iterations, 15);
+    assert_eq!(params.iterations, vistio_types::constants::DEFAULT_PD_ITERATIONS);
 }
 
 #[test]

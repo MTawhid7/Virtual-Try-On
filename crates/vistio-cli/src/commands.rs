@@ -54,9 +54,10 @@ pub fn benchmark(
             "cusick_drape" => ScenarioKind::CusickDrape,
             "cantilever_bending" => ScenarioKind::CantileverBending,
             "uniaxial_stretch" => ScenarioKind::UniaxialStretch,
+            "self_fold" => ScenarioKind::SelfFold,
             other => {
                 eprintln!("Unknown scenario: {other}");
-                eprintln!("Available: hanging_sheet, sphere_drape, cusick_drape, cantilever_bending, uniaxial_stretch, all");
+                eprintln!("Available: hanging_sheet, sphere_drape, cusick_drape, cantilever_bending, uniaxial_stretch, self_fold, all");
                 return Err("Unknown scenario".into());
             }
         };
@@ -157,6 +158,7 @@ pub fn visualize(
         "cusick_drape" => vistio_bench::scenarios::ScenarioKind::CusickDrape,
         "cantilever_bending" => vistio_bench::scenarios::ScenarioKind::CantileverBending,
         "uniaxial_stretch" => vistio_bench::scenarios::ScenarioKind::UniaxialStretch,
+        "self_fold" => vistio_bench::scenarios::ScenarioKind::SelfFold,
         other => {
             eprintln!("Unknown scenario: {other}");
             return Err("Unknown scenario".into());
