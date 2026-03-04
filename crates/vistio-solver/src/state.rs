@@ -157,9 +157,9 @@ impl SimulationState {
         }
     }
 
-    /// Small offset above ground height to prevent z-fighting between
-    /// cloth vertices and the ground plane visual.
-    const GROUND_SURFACE_OFFSET: f32 = 0.005;
+    /// Offset above ground height. Set to 0.0 because IPC barriers handle
+    /// ground separation mathematically — no artificial offset needed.
+    const GROUND_SURFACE_OFFSET: f32 = 0.0;
 
     /// Enforce ground plane constraint on current positions.
     ///

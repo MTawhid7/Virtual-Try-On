@@ -220,6 +220,7 @@ impl CollisionPipeline {
         let mut contact_ny = vec![0.0_f32; n_vertices];
         let mut contact_nz = vec![0.0_f32; n_vertices];
         let mut in_contact = vec![false; n_vertices];
+        let mut hessian_diag = vec![0.0_f32; n_vertices];
         let mut active_contacts = 0;
         let mut max_violation = 0.0_f32;
 
@@ -268,6 +269,11 @@ impl CollisionPipeline {
                 if d_surface * d_surface < d_hat || d_surface <= 0.0 {
                     contact_ny[i] += 1.0; // ground normal is +Y
                     in_contact[i] = true;
+                    // Barrier Hessian diagonal: κ · ∂²b/∂(d²)² · (2d)²
+                    let d_eff = d_surface.max(1e-6);
+                    let dist_sq = d_eff * d_eff;
+                    let h = crate::barrier::barrier_hessian(dist_sq, d_hat);
+                    hessian_diag[i] += (kappa * h * 4.0 * dist_sq).abs();
                 }
             }
         }
@@ -292,6 +298,11 @@ impl CollisionPipeline {
                         contact_nz[i] += dz / r;
                     }
                     in_contact[i] = true;
+                    // Barrier Hessian diagonal for sphere contact
+                    let d_eff = d_surface.max(1e-6);
+                    let dist_sq = d_eff * d_eff;
+                    let h = crate::barrier::barrier_hessian(dist_sq, d_hat);
+                    hessian_diag[i] += (kappa * h * 4.0 * dist_sq).abs();
                 }
             }
         }
@@ -335,6 +346,7 @@ impl CollisionPipeline {
             contact_ny,
             contact_nz,
             in_contact,
+            hessian_diag,
         }
     }
 

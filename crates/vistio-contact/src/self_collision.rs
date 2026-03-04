@@ -209,7 +209,7 @@ impl SelfCollisionSystem {
         // Update broad phase with current slices
         broad_phase.update(pos_x, pos_y, pos_z, thickness).ok();
 
-        let mut ipc_set = crate::ipc_response::IpcContactSet::new(d_hat, kappa);
+        let mut ipc_set = crate::ipc_response::IpcContactSet::new_with_thickness(d_hat, kappa, thickness);
 
         // We use triangle pairs from the BVH because IPC needs both
         // vertex-triangle and edge-edge contacts for robustness.

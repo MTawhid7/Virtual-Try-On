@@ -599,7 +599,12 @@ fn silk_drapes_more_than_denim() {
         let model = Box::new(CoRotationalModel::new());
 
         let mut solver = ProjectiveDynamicsSolver::new();
-        solver.init_with_material(&mesh, &topology, &config, props, model, &vec![false; mesh.vertex_count()]).unwrap();
+        let n = mesh.vertex_count();
+        let mut pinned = vec![false; n];
+        // Pin top two corners for a hanging sheet drape
+        pinned[0] = true;
+        pinned[4] = true;
+        solver.init_with_material(&mesh, &topology, &config, props, model, &pinned).unwrap();
 
         let n = mesh.vertex_count();
         let total_area: f32 = {
@@ -616,7 +621,7 @@ fn silk_drapes_more_than_denim() {
             }).sum()
         };
         let vm = props.mass_per_vertex(n, total_area);
-        let mut state = SimulationState::from_mesh(&mesh, vm, &vec![false; n]).unwrap();
+        let mut state = SimulationState::from_mesh(&mesh, vm, &pinned).unwrap();
 
         // Simulate 30 steps to let material differences accumulate
         for _ in 0..30 {

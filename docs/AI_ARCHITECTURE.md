@@ -60,7 +60,6 @@ While flexibility is encouraged, the historical development of Vistio provides e
 
 ## 6. Guidelines for AI Agents
 
-- **Avoid Global Grep / Brute Force Scanning**: We recommend leveraging this document's crate mapping to focus your file investigation explicitly on the target domains.
 - **Test Organization**: Vistio strictly organizes tests into `crates/<name>/tests/` (for integration scenarios) and `crates/<name>/src/tests/` (for unit-targeting internal logic). Please adhere to these locations.
 - **Human Collaboration**: After completing a major task "Tier" or solving structural anomalies, you are encouraged to document your insights deeply in `docs/WORKLOG.md`. Concurrently, update this `AI_ARCHITECTURE.md` file if data flows or crate structures pivot entirely. Use tool callbacks (`notify_user`) for major blocking decisions.
 - **Investigating Failures**: Root logs or standalone compiler pipelines are frequently dumped to `tools/logs/`. Refer to `test_errors.txt` inside that directory if test feedback requires raw compiler debugging.

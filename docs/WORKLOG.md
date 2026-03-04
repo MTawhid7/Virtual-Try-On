@@ -427,6 +427,65 @@ The simulation now utilizes a state-of-the-art contact handling architecture. We
 - [ ] Investigate and resolve the persistent bouncy oscillation above the floor.
 - [ ] Tune IPC `d_hat` and the contact damping heuristics to encourage rapid kinetic energy settling.
 
+## 2026-03-04 (Update: Diagnostic Deep Dive on Simulation Stability)
+
+### Current State
+
+**Tier 4 — Stabilization Phase (Reverted to Diagnostic Mode).**
+After implementing extensive Phase 2 (Solver Quality Improvements) and Phase 3 (Compliant Contact) integrations, the simulation has regressed to the unstable state observed at the beginning of the diagnostic session. While we successfully eliminated the severe "chewing gum" stretching and catastrophic barrier explosions by correcting the Augmented Lagrangian (AL) multiplier application, fundamental physics anomalies remain.
+
+The fabric continues to exhibit an unnatural bounce upon collision, settles with a visible gap above the ground floor, and ultimately succumbs to a continuous numerical oscillation that cascades into terminal divergence (infinite upward acceleration). Feature development is strictly halted. The project is now entering an intensive, fully instrumented debugging diagnostic phase.
+
+### 1. Modifications and Experiments Conducted
+
+During the preceding stage, we attempted to integrate several advanced numerical features to improve the IPC barrier contact resolution:
+
+- **Barrier Hessian Diagonal Proxy:** Attempted to precondition the Cholesky RHS using a Jacobi diagonal proxy (`hessian_diag`) to compensate for missing barrier stiffness in the constant system matrix $A$.
+- **Lagged Implicit Friction:** Substituted the post-solve kinematic velocity filter with direct Coulomb friction forces injected into the LHS/RHS of the solver loop natively.
+- **Chebyshev Acceleration:** Added Successive Over-Relaxation (SOR) step extrapolation to accelerate local-global convergence.
+- **Energy-Based Convergence:** Transitioned the PD termination criteria from displacement norm $||\Delta x||$ to incremental potential energy $\Delta E$.
+- **Compliant Contact Model:** Scaled the barrier activation zone (`d_hat`) dynamically to widen the deceleration area.
+- **Velocity Filtering (e=0):** Modified the post-solve inelasticity filter to perfectly zero out normal velocities ($v \cdot n = 0$) unconditionally inside the barrier zone to counteract the purely elastic potential bounce.
+- **AL Penalty Adjustments:** Modified `al_mu_initial` and multiplier ($\lambda$) accumulation logic, specifically removing equality multiplier accumulation on the inequality log-barrier gradients.
+
+*Note: The vast majority of these features (Hessian Proxy, Chebyshev, Energy Convergence, Lagged Friction) were actively disabled after they were shown to induce further mathematical instability when applied implicitly to the highly non-linear IPC energy landscape.*
+
+### 2. Observed Behaviors and Anomalies
+
+The simulation currently presents three distinct, reproducible bugs across all simulation runs (e.g., `sphere_drape`):
+
+1. **The Unnatural Bounce:** Despite the perfectly inelastic velocity filter, the cloth vigorously rebounds upwards immediately upon contacting the analytical sphere or the ground plane.
+2. **The Contact Gap:** When the kinetic energy subsides and the cloth appears to "rest," it floats with a visible, macroscopic gap separating it from the floor rather than achieving flush physical contact.
+3. **Terminal Divergence (The Infinity Bug):** The resting cloth does not remain stable. It natively oscillates vertically at a high frequency. After a short, unpredictable duration (typically under 100 timesteps), the mesh rapidly accelerates toward positive infinity, completely exiting the simulation domain and outputting `NaN` or `f32::MAX` coordinates.
+
+### 3. Preliminary Hypotheses
+
+- **The Bounce & Gap (Barrier Over-stiffness):** IPC utilizes an infinite potential well $B(d) = -\kappa \log(d/\hat{d})$. If the barrier activation distance $\hat{d}$ is too large or the solver is terminating early in the AL loop, the cloth naturally rests exactly at the boundary where gravity balances the barrier force (which is significantly $> 0$), creating the gap. The initial bounce happens because the barrier force $F \propto 1/d$ ramps up exponentially faster than the explicit velocity filter can dissipate the energy across consecutive frames.
+- **Numerical Divergence (Stiff ODE Constraints):** The terminal infinite acceleration is a classic signature of poorly scaled explicit forces in a constant-matrix implicit solver. By completely zeroing out the Augmented Lagrangian multipliers ($\lambda$) and relying purely on the state-dependent penalty $\mu \nabla B$, the solver may be requiring a massive $\mu$ to enforce non-penetration. A massive $\mu$ makes the RHS vector violently stiff, blowing up the system if the mesh drifts even microscopically deep into the barrier singularity.
+
+### 4. Quantitative Observations
+
+- **Energy Evolution:** Kinetic energy fails to monotonically decay. It drops sharply upon the velocity filter, but potential energy spikes violently during the subsequent predict/solve step.
+- **Multiplier Stalling:** The `al_mu_initial` was previously initialized at $10^4$ while `kappa` was already balancing gravity ($9.81$). This meant initial contact forces were physically $10,000\times$ heavier than the fabric mass. Even after correcting `al_mu` back to $1.0$, instability persists.
+- *Note: Further precise instrumentation is the primary goal of the next phase.*
+
+### 5. Outstanding Issues and Technical Risks
+
+- **Risk:** The Projective Dynamics (PD) constant system matrix $A$ assumes an isotropic energy landscape. Applying violently anisotropic forces (like a one-sided infinite collision barrier) via pure RHS modifications tests the extreme limits of the solver's convergence radius.
+- **Risk:** Bypassing standard KKT inequality multipliers for pure penalty methods severely shrinks the usable stable timestep for stiff collisions.
+
+### 6. Structured Plan for Next Phase (Diagnostic Deep Dive)
+
+Do not attempt incremental fixes. We must rigorously mathematically prove the anomaly source.
+
+1. **Extensive Metric Instrumentation:** Build a comprehensive telemetry tracing system directly into the `step_with_ipc` loop.
+    - Track per-vertex Maximum Barrier Gradient.
+    - Track total System Kinetic, Elastic, and Barrier Potential Energies separately.
+    - Track the exact distance to the nearest collider for the worst-offending vertex per frame.
+2. **Isolate the AL Loop:** Run the solver with standard collision resolution (Projection) vs. IPC to strictly isolate if the anomaly is native to the Matrix solver or explicitly the Log-Barrier formulation.
+3. **Validate Matrix Scaling:** Output the magnitude of the barrier RHS vector component vs the membrane/bending RHS component to ensure the barrier forces aren't overflowing `f32` precision limits before the Cholesky solve.
+4. **Math Verification:** Verify if the derivative of the barrier potential $\nabla B(x)$ correctly matches the closed-form geometry derivative of the exact closest point.
+
 <!-- TEMPLATE: Copy the block below for each new day -->
 
 <!--

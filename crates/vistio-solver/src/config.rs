@@ -103,6 +103,29 @@ pub struct SolverConfig {
     /// Closer to 1.0 = less damping, closer to 0.0 = more damping.
     /// Default: 0.05 (strong damping for inelastic cloth contact).
     pub contact_damping: f32,
+
+    // ─── Compliant Contact (Phase 3) ─────────────────────────
+
+    /// Enable compliant contact model (wider, softer barrier zone).
+    /// When true, d_hat is scaled by `compliant_d_hat_scale` for a more
+    /// gradual deceleration instead of hard stopping.
+    pub compliant_contact: bool,
+
+    /// Scale factor applied to d_hat when compliant contact is enabled.
+    /// Default: 2.0 (doubles the barrier activation zone).
+    pub compliant_d_hat_scale: f32,
+
+    /// Enable velocity-dependent adaptive contact damping.
+    /// Fast-approaching vertices get less damping (let barrier decelerate naturally),
+    /// near-rest vertices get more damping (accelerate settling).
+    pub adaptive_contact_damping: bool,
+
+    /// Maximum contact damping factor (used at near-zero velocity).
+    pub contact_damping_max: f32,
+
+    /// Velocity threshold for adaptive damping (m/s).
+    /// Below this velocity, damping increases toward `contact_damping_max`.
+    pub contact_velocity_threshold: f32,
 }
 
 impl Default for SolverConfig {
@@ -126,12 +149,18 @@ impl Default for SolverConfig {
             barrier_kappa: 0.0,   // 0 = adaptive estimation
             ipc_enabled: false,
             ccd_enabled: true,
-            al_max_iterations: 3,
+            al_max_iterations: 5,
             al_mu_initial: 1.0,
-            al_mu_growth: 2.0,
-            al_tolerance: 1e-4,
+            al_mu_growth: 10.0,
+            al_tolerance: 1e-3,
             friction_coefficient: 0.4,
             contact_damping: 0.3,
+            // Phase 3: Compliant contact defaults
+            compliant_contact: true,
+            compliant_d_hat_scale: 2.0,
+            adaptive_contact_damping: true,
+            contact_damping_max: 0.5,
+            contact_velocity_threshold: 0.1,
         }
     }
 }

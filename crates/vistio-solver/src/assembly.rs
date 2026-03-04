@@ -272,11 +272,10 @@ pub enum BendingRhs<'a> {
 pub fn assemble_barrier_rhs(
     rhs: &mut [f32],
     barrier_grad: &[f32],
-    lambda: &[f32],
     mu: f32,
 ) {
     for i in 0..rhs.len().min(barrier_grad.len()) {
-        // Force = -(μ · ∇barrier + λ)
-        rhs[i] -= mu * barrier_grad[i] + lambda[i];
+        // Force = -(μ · ∇barrier)
+        rhs[i] -= mu * barrier_grad[i];
     }
 }

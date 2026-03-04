@@ -30,6 +30,10 @@ impl<'a> IpcCollisionHandler for RunnerIpcHandler<'a> {
     fn compute_ccd_step(&mut self, prev_x: &[f32], prev_y: &[f32], prev_z: &[f32], new_x: &[f32], new_y: &[f32], new_z: &[f32]) -> f32 {
         self.pipeline.compute_ccd_step(&self.mesh.indices, prev_x, prev_y, prev_z, new_x, new_y, new_z)
     }
+
+    fn set_d_hat(&mut self, d_hat: f32) {
+        self.d_hat = d_hat;
+    }
 }
 
 
@@ -201,8 +205,7 @@ impl BenchmarkRunner {
                     step_times.push(result.wall_time);
                     total_iterations += result.iterations;
 
-                    // Ground plane still handled post-solve for now
-                    let _ = pipeline.step(&mut state)?;
+                    // IPC barriers handle all contact — no post-solve projection needed.
                 } else {
                     let result: StepResult = solver.step(&mut state, scenario.dt)?;
                     step_times.push(result.wall_time);

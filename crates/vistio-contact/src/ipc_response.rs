@@ -48,6 +48,10 @@ pub struct IpcContactSet {
     pub d_hat: f32,
     /// Barrier stiffness scaling.
     pub kappa: f32,
+    /// Fabric thickness for C-IPC (Phase 3.1).
+    /// Self-collision contacts use thickness-aware barriers;
+    /// body collider contacts use standard barriers.
+    pub thickness: f32,
 }
 
 impl IpcContactSet {
@@ -57,6 +61,17 @@ impl IpcContactSet {
             contacts: Vec::new(),
             d_hat,
             kappa,
+            thickness: 0.0,
+        }
+    }
+
+    /// Create a new, empty contact set with thickness-aware barriers.
+    pub fn new_with_thickness(d_hat: f32, kappa: f32, thickness: f32) -> Self {
+        Self {
+            contacts: Vec::new(),
+            d_hat,
+            kappa,
+            thickness,
         }
     }
 
@@ -167,7 +182,12 @@ impl IpcContactSet {
             let d_sq = self.recompute_distance(contact, pos_x, pos_y, pos_z);
 
             // dE/d(d²): barrier gradient w.r.t. squared distance
-            let barrier_grad = barrier::scaled_barrier_gradient(d_sq, self.d_hat, self.kappa);
+            // C-IPC: self-collision contacts use thickness-aware barrier (Phase 3.1)
+            let barrier_grad = if contact.is_self && self.thickness > 0.0 {
+                barrier::scaled_barrier_gradient_with_thickness(d_sq, self.d_hat, self.kappa, self.thickness)
+            } else {
+                barrier::scaled_barrier_gradient(d_sq, self.d_hat, self.kappa)
+            };
 
             // d(d²)/d(vertex positions): distance gradient w.r.t. vertex positions
             let dist_grads = self.compute_distance_gradient(contact, pos_x, pos_y, pos_z);
@@ -288,4 +308,3 @@ impl IpcContactSet {
         }
     }
 }
-

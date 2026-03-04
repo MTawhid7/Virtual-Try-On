@@ -262,6 +262,10 @@ impl<'a> vistio_solver::pd_solver::IpcCollisionHandler for ViewerIpcHandler<'a> 
     fn compute_ccd_step(&mut self, prev_x: &[f32], prev_y: &[f32], prev_z: &[f32], new_x: &[f32], new_y: &[f32], new_z: &[f32]) -> f32 {
         self.pipeline.compute_ccd_step(&self.mesh.indices, prev_x, prev_y, prev_z, new_x, new_y, new_z)
     }
+
+    fn set_d_hat(&mut self, d_hat: f32) {
+        self.d_hat = d_hat;
+    }
 }
 
 fn simulate_cloth(
@@ -334,18 +338,9 @@ fn simulate_cloth(
         }
     };
 
-    // Post-solve: enforce analytical colliders as a safety net.
-    // We do NOT run the full pipeline.step() (which includes self-collision
-    // projection response), only the analytical sphere/ground projections
-    // that prevent penetration when barrier forces are too weak.
-    if let Some(ref mut pipeline) = collision {
-        if let Some(ref sphere) = pipeline.sphere {
-            sphere.resolve(state);
-        }
-        if let Some(ref ground) = pipeline.ground {
-            ground.resolve(state);
-        }
-    }
+    // Post-solve: IPC barriers handle all contact enforcement.
+    // No post-solve hard projection needed — it would inject energy and
+    // create oscillation by overriding barrier-computed positions.
 
     runner.current_step += 1;
     } // end fixed-timestep loop

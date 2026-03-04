@@ -19,9 +19,12 @@ pub fn barrier_energy(d: f32, d_hat: f32) -> f32 {
     if d >= d_hat || d <= 0.0 {
         return 0.0;
     }
-    let diff = d - d_hat;
-    let ratio = d / d_hat;
-    -(diff * diff) * ratio.ln()
+    // Compute in f64 to avoid catastrophic cancellation when d ≈ d_hat
+    let d64 = d as f64;
+    let dh64 = d_hat as f64;
+    let diff = d64 - dh64;
+    let ratio = d64 / dh64;
+    (-(diff * diff) * ratio.ln()) as f32
 }
 
 /// Compute the first derivative of the barrier energy w.r.t. distance d.
@@ -34,9 +37,12 @@ pub fn barrier_gradient(d: f32, d_hat: f32) -> f32 {
     if d_c >= d_hat {
         return 0.0;
     }
-    let diff = d_c - d_hat;
-    let ln_ratio = (d_c / d_hat).ln();
-    -(diff) * (2.0 * ln_ratio + diff / d_c)
+    // Compute in f64 to avoid catastrophic cancellation when d ≈ d_hat
+    let d64 = d_c as f64;
+    let dh64 = d_hat as f64;
+    let diff = d64 - dh64;
+    let ln_ratio = (d64 / dh64).ln();
+    (-(diff) * (2.0 * ln_ratio + diff / d64)) as f32
 }
 
 /// Compute the second derivative of the barrier energy w.r.t. distance d.
@@ -48,10 +54,13 @@ pub fn barrier_hessian(d: f32, d_hat: f32) -> f32 {
     if d >= d_hat || d <= 0.0 {
         return 0.0;
     }
-    let diff = d - d_hat;
-    let ln_ratio = (d / d_hat).ln();
-    let inv_d = 1.0 / d;
-    -2.0 * ln_ratio - 4.0 * diff * inv_d + diff * diff * inv_d * inv_d
+    // Compute in f64 to avoid catastrophic cancellation when d ≈ d_hat
+    let d64 = d as f64;
+    let dh64 = d_hat as f64;
+    let diff = d64 - dh64;
+    let ln_ratio = (d64 / dh64).ln();
+    let inv_d = 1.0 / d64;
+    (-2.0 * ln_ratio - 4.0 * diff * inv_d + diff * diff * inv_d * inv_d) as f32
 }
 
 /// Compute the barrier energy scaled by a stiffness parameter κ.
@@ -63,11 +72,18 @@ pub fn scaled_barrier_energy(d: f32, d_hat: f32, kappa: f32) -> f32 {
 
 /// Compute the barrier gradient scaled by a stiffness parameter κ.
 ///
-/// Returns `κ * ∂b/∂d`.  Clamped to `±1e4` to prevent the barrier from
-/// overwhelming the PD solver's inertia term (M/h²).
+/// Returns `κ * ∂b/∂d`. No clamping — relies on f64 precision in
+/// `barrier_gradient()` and the natural barrier shape to stay finite.
+/// Falls back to a bounded value only if result is NaN or infinite.
 pub fn scaled_barrier_gradient(d: f32, d_hat: f32, kappa: f32) -> f32 {
     let raw = barrier_gradient(d, d_hat);
-    (kappa * raw).clamp(-1e4, 1e4)
+    let result = kappa * raw;
+    if result.is_finite() {
+        result
+    } else {
+        // Safety fallback for degenerate inputs
+        result.signum() * 1e6
+    }
 }
 
 /// Estimate initial barrier stiffness κ from mesh and material properties.
@@ -136,7 +152,12 @@ pub fn scaled_barrier_gradient_with_thickness(
     thickness: f32,
 ) -> f32 {
     let raw = barrier_gradient_with_thickness(d, d_hat, thickness);
-    (kappa * raw).clamp(-1e4, 1e4)
+    let result = kappa * raw;
+    if result.is_finite() {
+        result
+    } else {
+        result.signum() * 1e6
+    }
 }
 
 /// Sum the barrier energy across a set of per-vertex signed distances
@@ -157,4 +178,3 @@ pub fn barrier_energy_total(distances: &[f32], d_hat: f32, kappa: f32) -> f64 {
     }
     total
 }
-
