@@ -498,7 +498,7 @@ A comprehensive analysis of the entire codebase was conducted, identifying 13 di
 A full technical analysis was conducted across all solver and contact crates. The following implementation flaws were catalogued:
 
 | # | Flaw | File | Severity |
-|---|------|------|----------|
+| --- | --- | --- | --- |
 | 1 | Frozen barrier gradients (computed once per AL outer loop, stale across PD inner iterations) | `pd_solver.rs` | Critical |
 | 2 | Missing barrier Hessian in system matrix A (barrier stiffness not in LHS) | `pd_solver.rs` | Critical |
 | 3 | Broken Armijo line search (uses stale barrier gradients, not true energy-based) | `pd_solver.rs` | High |
@@ -565,26 +565,26 @@ Added `#[cfg(debug_assertions)]` guarded logging to `pd_solver.rs` and `sphere.r
 
 **Per-AL-iteration (inside outer loop):**
 
-```
+```text
 AL[{iter}] mu={mu} violation={max_violation} contacts={n} max_speed={v} KE={ke}
 ```
 
 **Per-frame (after velocity filter):**
 
-```
+```text
 FRAME: KE={ke} y=[{min_y},{max_y}] max_speed={v} al_converged={bool} iters={n}
 ```
 
 **Per-sphere-detection (inside detect_ipc_contacts):**
 
-```
+```text
 SPHERE: d_hat={d_hat} kappa={kappa} min_d_surface={d} min_d²={d²} d_surface<√d_hat={bool}
 ```
 
 #### Key Data Points (Debug Benchmark, 180 Frames, Without Velocity Clamp)
 
 | Frame | KE | y-range | max_speed | contacts | violation | AL iters |
-|-------|-----|---------|-----------|----------|-----------|----------|
+| --- | --- | --- | --- | --- | --- | --- |
 | 1-24 | 0.006 → 1.48 | 0.997 → 0.351 | 0.16 → 2.57 | 0 | 0.00 | 2 |
 | 25 (first contact) | 1.053 | 0.325, 0.535 | **11.02** | 0 | 0.00 | 10 |
 | 26-40 | 0.22 → 0.11 | settling | 1.3-1.7 | 0 | 0.00 | 10 |
@@ -599,7 +599,7 @@ SPHERE: d_hat={d_hat} kappa={kappa} min_d_surface={d} min_d²={d²} d_surface<�
 #### Key Data Points (Debug Benchmark, With Velocity Clamp)
 
 | Frame | KE | y-range | max_speed | contacts | AL iters |
-|-------|-----|---------|-----------|----------|----------|
+| --- | --- | --- | --- | --- | --- |
 | 1-10 | 0.006 → 0.484 | 0.997 → 0.843 | 0.16 → 1.47 | 0 | 2 |
 | 11-28 | 0.510 (clamped) | 0.818 → 0.414 | **1.505** (stable) | 0 | 2 |
 | 29 (first contact) | 0.486 | 0.341, 0.347 | 1.496 | detected | 20 |
@@ -634,7 +634,7 @@ IPC barriers are purely elastic — they store energy as potential and return it
 **Files modified from the pre-session baseline:**
 
 | File | Changes Active |
-|------|---------------|
+| --- | --- |
 | `pd_solver.rs` | CFL velocity clamp (pre-prediction), diagnostic logging (#[cfg(debug_assertions)]), velocity filter removes ALL normal velocity, `enforce_ground_velocities()` restored |
 | `config.rs` | `al_max_iterations: 10`, `al_tolerance: 1e-4` (from 5 and 1e-3) |
 | `ground_plane.rs` | Depth-proportional penetration recovery, barrier-zone violation reporting |

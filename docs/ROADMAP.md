@@ -36,7 +36,7 @@ Where $\mathbf{M}$ is the mass matrix, $\mathbf{f}$ is the total force vector, a
 **Constitutive Models (What makes cloth "cloth"):**
 
 | Model | Properties | Use Case |
-|---|---|---|
+| --- | --- | --- |
 | **St. Venant-Kirchhoff** | Linear stress-strain. Simple but breaks under compression (negative eigenvalues). | Prototyping only |
 | **Co-Rotational** | Extracts rotation, applies linear elasticity in local frame. Handles large rotations. | General-purpose. Good default. |
 | **Discrete Shells (Grinspun 2003)** | Bending energy based on dihedral angles between triangles. The curvature-based formulation is essential for realistic folds. | Bending model for any solver |
@@ -202,7 +202,7 @@ This paper addresses knitted fabrics, which have fundamentally different mechani
 Style3D does not publish its solver algorithms, but public information reveals a clear architectural picture:
 
 | Capability | Technical Inference |
-|---|---|
+| --- | --- |
 | "World-leading Deformable Body Simulation" | Custom FEM-class solver, likely implicit with GPU global solve |
 | GPU solver, optimized for NVIDIA | CUDA-accelerated. Likely custom sparse solver, not just PD local step |
 | 1M+ polygons, smooth simulation | Adaptive meshing with aggressive LOD culling. Subspace decomposition for solver. |
@@ -277,7 +277,7 @@ Vellum demonstrates that XPBD *can* reach production quality for VFX, but it rel
 Differentiable simulation is the emerging paradigm that connects physics simulation to machine learning. It enables:
 
 | Capability | How It Works |
-|---|---|
+| --- | --- |
 | **Material Parameter Estimation** | Given a video of real fabric draping, optimize material parameters until the simulation matches the video. Gradient flows backward through the solver. |
 | **Inverse Garment Design** | Given a desired draped shape, find the 2D pattern that produces it when simulated. |
 | **Neural Cloth Models** | Train a neural network to approximate the simulator, enabling real-time inference at offline quality. |
@@ -311,7 +311,7 @@ This eliminates the "tune until it looks right" problem that plagues XPBD and ma
 All simulation fidelity is ultimately meaningless without grounding in real fabric behavior. The **Kawabata Evaluation System (KES)** is the industry standard for measuring low-stress mechanical properties:
 
 | KES Instrument | Property Measured | Simulation Mapping |
-|---|---|---|
+| --- | --- | --- |
 | **KES-FB1** (Tensile/Shear) | Extension, shear stiffness, hysteresis | Young's modulus, Poisson's ratio, shear modulus |
 | **KES-FB2** (Bending) | Bending rigidity $(B)$, hysteresis $(2HB)$ | Bending stiffness in discrete shells model |
 | **KES-FB3** (Compression) | Thickness, compressibility | Contact thickness, collision offset |
@@ -368,7 +368,7 @@ Synthesizing all available information, the Style3D architecture almost certainl
 ### What Would It Take to Match or Surpass Style3D?
 
 | Style3D Capability | What We Need | Difficulty |
-|---|---|---|
+| --- | --- | --- |
 | Accurate implicit solver | PD with co-rotational FEM + anisotropic extensions | **Achievable** (well-documented in literature) |
 | GPU acceleration | CUDA or Vulkan Compute for local step + sparse solve | **Achievable** (reference implementations exist) |
 | IPC-class contact | Implement non-distance barriers (SIGGRAPH Asia 2024) | **Hard** (cutting-edge, but paper is detailed) |
@@ -414,7 +414,7 @@ Synthesizing all available information, the Style3D architecture almost certainl
 **Language decision:** This is the point to decide between Rust (leveraging team expertise) and C++ (leveraging ecosystem). The recommendation:
 
 | Factor | Rust | C++ |
-|---|---|---|
+| --- | --- | --- |
 | Team familiarity | ★★★★★ | ★★☆☆☆ |
 | GPU compute | wgpu (Vulkan/Metal/DX12) | CUDA (NVIDIA only) or Vulkan |
 | Sparse linear algebra | nalgebra-sparse, faer | Eigen, SuiteSparse (CHOLMOD) |
@@ -505,7 +505,7 @@ Synthesizing all available information, the Style3D architecture almost certainl
 Create an initial material library from published fabric data:
 
 | Material | Areal Density | Stretch Stiffness (Warp/Weft) | Bending Rigidity | Friction |
-|---|---|---|---|---|
+| --- | --- | --- | --- | --- |
 | Cotton Twill (200gsm) | 200 g/m² | High / High | Medium | 0.5 |
 | Silk Charmeuse | 80 g/m² | Low / Low | Very Low | 0.3 |
 | Denim (14oz) | 400 g/m² | Very High / High | High | 0.6 |
@@ -530,7 +530,7 @@ Create an initial material library from published fabric data:
 
 This is the most technically challenging tier. There are two implementation paths:
 
-**Path A: Non-Distance Barriers (SIGGRAPH Asia 2024)**
+#### Path A: Non-Distance Barriers (SIGGRAPH Asia 2024)
 
 Advantages:
 
@@ -544,7 +544,7 @@ Disadvantages:
 - Very recent paper — fewer reference implementations
 - Requires integrating a line-search mechanism into the PD solver
 
-**Path B: Classical IPC with C-IPC Extensions**
+#### Path B: Classical IPC with C-IPC Extensions
 
 Advantages:
 
@@ -702,7 +702,7 @@ sequenceDiagram
 ## Part IV — Risk Register & Mitigation
 
 | Risk | Tier | Severity | Mitigation |
-|---|---|---|---|
+| --- | --- | --- | --- |
 | CHOLMOD FFI complexity | 1 | Medium | Use the `suitesparse-sys` Rust crate. Test with small matrices first. Fallback: `faer` crate (pure Rust sparse Cholesky). |
 | Co-rotational polar decomposition instability | 2 | Low | Well-understood numerics. Use SVD fallback for degenerate triangles ($\det(\mathbf{F}) < \epsilon$). |
 | Anisotropic model parameter sensitivity | 3 | Medium | Start with isotropic (warp = weft) and gradually introduce difference. Validate against KES data for each step. |
