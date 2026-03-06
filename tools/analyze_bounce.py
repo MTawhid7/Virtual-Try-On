@@ -1,6 +1,6 @@
 import csv
 
-with open('diagnostics.csv', 'r') as f:
+with open('debug/diagnostics.csv', 'r') as f:
     reader = csv.reader(f)
     headers = next(reader)
     rows = list(reader)

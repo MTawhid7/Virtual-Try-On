@@ -24,9 +24,11 @@ Thumbs.db
 *.csv
 results/
 
-# ─── Debug snapshots ──────────────────────────────────────────
+# ─── Debug snapshots & Logs ───────────────────────────────────
 *.bin
+*.log
 snapshots/
+debug/
 
 # ─── Agent / AI metadata ──────────────────────────────────────
 .agents/

@@ -171,67 +171,75 @@ pub fn uv_sphere(radius: f32, stacks: usize, slices: usize) -> TriangleMesh {
 /// - `radius` — Radius of the circle.
 /// - `segments` — Number of angular subdivisions.
 /// - `rings` — Number of concentric radial subdivisions.
-pub fn circular_grid(radius: f32, segments: usize, rings: usize) -> TriangleMesh {
-    let vertex_count = 1 + rings * segments;
-    let tri_count = segments + (rings - 1) * segments * 2;
-    let mut mesh = TriangleMesh::with_capacity(vertex_count, tri_count);
+pub fn circular_grid(radius: f32, segments: usize, _rings: usize) -> TriangleMesh {
+    let resolution = segments / 2; // Match vertex count roughly
+    let cols = resolution;
+    let rows = resolution;
+    let width = radius * 2.0;
+    let height = radius * 2.0;
+    let half_w = width / 2.0;
+    let half_h = height / 2.0;
 
-    mesh.pos_x.push(0.0);
-    mesh.pos_y.push(0.0);
-    mesh.pos_z.push(0.0);
-    mesh.normal_x.push(0.0);
-    mesh.normal_y.push(0.0);
-    mesh.normal_z.push(1.0);
-    mesh.uv_u.push(0.5);
-    mesh.uv_v.push(0.5);
+    let mut mesh = TriangleMesh::with_capacity(cols * rows, cols * rows * 2);
+    let mut vertex_map = vec![usize::MAX; (cols + 1) * (rows + 1)];
+    let mut current_vertex = 0;
 
-    for r in 1..=rings {
-        let current_radius = radius * (r as f32 / rings as f32);
-        for s in 0..segments {
-            let theta = 2.0 * std::f32::consts::PI * (s as f32 / segments as f32);
-            let x = current_radius * theta.cos();
-            let y = current_radius * theta.sin();
+    for j in 0..=rows {
+        for i in 0..=cols {
+            let u = i as f32 / cols as f32;
+            let v = j as f32 / rows as f32;
+            let px = -half_w + u * width;
+            let py = half_h - v * height;
 
-            mesh.pos_x.push(x);
-            mesh.pos_y.push(y);
-            mesh.pos_z.push(0.0);
-            mesh.normal_x.push(0.0);
-            mesh.normal_y.push(0.0);
-            mesh.normal_z.push(1.0);
-            mesh.uv_u.push(0.5 + 0.5 * (x / radius));
-            mesh.uv_v.push(0.5 + 0.5 * (y / radius));
+            if (px * px + py * py).sqrt() <= radius * 1.01 {
+                mesh.pos_x.push(px);
+                mesh.pos_y.push(py);
+                mesh.pos_z.push(0.0);
+                mesh.normal_x.push(0.0);
+                mesh.normal_y.push(0.0);
+                mesh.normal_z.push(1.0);
+                mesh.uv_u.push(u);
+                mesh.uv_v.push(v);
+
+                vertex_map[j * (cols + 1) + i] = current_vertex;
+                current_vertex += 1;
+            }
         }
     }
 
-    for s in 0..segments {
-        let v0 = 0;
-        let v1 = 1 + s;
-        let v2 = 1 + (s + 1) % segments;
-        mesh.indices.push(v0 as u32);
-        mesh.indices.push(v1 as u32);
-        mesh.indices.push(v2 as u32);
-        mesh.material_ids.push(MaterialId(0));
-    }
+    for j in 0..rows {
+        for i in 0..cols {
+            let top_left = j * (cols + 1) + i;
+            let top_right = top_left + 1;
+            let bot_left = top_left + (cols + 1);
+            let bot_right = bot_left + 1;
 
-    for r in 1..rings {
-        let ring_start = 1 + (r - 1) * segments;
-        let next_ring_start = 1 + r * segments;
-        for s in 0..segments {
-            let next_s = (s + 1) % segments;
-            let v0 = ring_start + s;
-            let v1 = ring_start + next_s;
-            let v2 = next_ring_start + s;
-            let v3 = next_ring_start + next_s;
+            let tl_v = vertex_map[top_left];
+            let tr_v = vertex_map[top_right];
+            let bl_v = vertex_map[bot_left];
+            let br_v = vertex_map[bot_right];
 
-            mesh.indices.push(v0 as u32);
-            mesh.indices.push(v1 as u32);
-            mesh.indices.push(v3 as u32);
-            mesh.material_ids.push(MaterialId(0));
+            if tl_v != usize::MAX && tr_v != usize::MAX && bl_v != usize::MAX && br_v != usize::MAX {
+                if (i + j) % 2 == 0 {
+                    mesh.indices.push(tl_v as u32);
+                    mesh.indices.push(bl_v as u32);
+                    mesh.indices.push(tr_v as u32);
 
-            mesh.indices.push(v0 as u32);
-            mesh.indices.push(v3 as u32);
-            mesh.indices.push(v2 as u32);
-            mesh.material_ids.push(MaterialId(0));
+                    mesh.indices.push(tr_v as u32);
+                    mesh.indices.push(bl_v as u32);
+                    mesh.indices.push(br_v as u32);
+                } else {
+                    mesh.indices.push(tl_v as u32);
+                    mesh.indices.push(bl_v as u32);
+                    mesh.indices.push(br_v as u32);
+
+                    mesh.indices.push(tl_v as u32);
+                    mesh.indices.push(br_v as u32);
+                    mesh.indices.push(tr_v as u32);
+                }
+                mesh.material_ids.push(MaterialId(0));
+                mesh.material_ids.push(MaterialId(0));
+            }
         }
     }
 

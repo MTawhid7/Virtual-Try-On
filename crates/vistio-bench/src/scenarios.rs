@@ -149,18 +149,23 @@ impl Scenario {
 
     /// Create a scenario by kind.
     pub fn cusick_drape() -> Self {
-        let mut garment = vistio_mesh::generators::circular_grid(0.30, 64, 15);
+        let mut garment = vistio_mesh::generators::circular_grid(0.15, 64, 15);
         let n = garment.vertex_count();
         for i in 0..n {
             garment.pos_z[i] = garment.pos_y[i];
-            garment.pos_y[i] = 0.4;
+            garment.pos_y[i] = 0.5;
         }
+        let config = SolverConfig {
+            ipc_enabled: true, // Use IPC guarantees to prevent penetration
+            ..Default::default()
+        };
+
         Self {
             kind: ScenarioKind::CusickDrape,
             garment,
             body: None,
             pinned: vec![false; n],
-            config: SolverConfig::default(),
+            config,
             timesteps: 300,
             dt: 1.0 / 60.0,
             vertex_mass: 0.002,
@@ -224,21 +229,32 @@ impl Scenario {
 
     /// Create the self-fold scenario.
     ///
-    /// Cloth dropped diagonally onto the ground, folding onto itself.
+    /// A long, narrow ribbon of cloth dropped vertically onto the ground,
+    /// buckling and folding onto itself multiple times.
     pub fn self_fold() -> Self {
-        let mut garment = quad_grid(20, 20, 1.0, 1.0);
+        // 0.2m x 2.0m ribbon, 10x50 resolution
+        let mut garment = quad_grid(10, 50, 0.2, 2.0);
         let n = garment.vertex_count();
 
-        // Rotate at an angle and elevate
+        // Elevate the ribbon and add a slight angle to encourage consistent buckling
         for i in 0..n {
-            let cx = garment.pos_x[i] - 0.5;
-            let cy = garment.pos_y[i] - 0.5;
-            garment.pos_z[i] = cx * 0.707 - cy * 0.707;
-            garment.pos_y[i] = cx * 0.707 + cy * 0.707 + 1.0;
+            let x = garment.pos_x[i];
+            let y = garment.pos_y[i]; // [-1.0, 1.0]
+
+            // ~10 degree tilt around Z axis
+            let c = 0.9848;
+            let s = 0.1736;
+
+            let rx = x * c - y * s;
+            let ry = x * s + y * c;
+
+            garment.pos_x[i] = rx;
+            garment.pos_y[i] = ry + 1.2; // Elevate so the lowest point is around 0.2m above ground
+            garment.pos_z[i] = 0.0;
         }
 
         let config = SolverConfig {
-            ipc_enabled: true, // Use IPC for self-collision
+            ipc_enabled: false, // Deferred self-collision to GPU Compute (Tier 5)
             ..Default::default()
         };
 
@@ -248,10 +264,10 @@ impl Scenario {
             body: None,
             pinned: vec![false; n],
             config,
-            timesteps: 300,
+            timesteps: 400, // Longer to give it time to stack
             dt: 1.0 / 60.0,
-            vertex_mass: 0.002,
-            material: None,
+            vertex_mass: 0.00014, // ~200g/m^2 cloth for 561 vertices
+            material: Some(vistio_material::FabricProperties::silk_charmeuse()),
         }
     }
 

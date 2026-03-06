@@ -70,7 +70,7 @@ impl BenchmarkRunner {
             0.0,       // stiffness
         );
 
-        if is_ipc {
+        if is_ipc && scenario.kind == crate::scenarios::ScenarioKind::SelfFold {
             pipeline = pipeline.with_self_collision(&Topology::build(&scenario.garment), 1);
         }
 

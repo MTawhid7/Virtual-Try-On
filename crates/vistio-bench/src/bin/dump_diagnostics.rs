@@ -68,7 +68,7 @@ fn main() -> VistioResult<()> {
         .with_ground(-0.3)
         .with_sphere(vistio_math::Vec3::new(0.0, 0.0, 0.0), 0.3);
 
-    let mut csv_file = File::create("diagnostics.csv").expect("Could not create diagnostics.csv");
+    let mut csv_file = File::create("debug/diagnostics.csv").expect("Could not create debug/diagnostics.csv");
     writeln!(csv_file, "frame,iters,max_y,min_y,ke,max_speed,max_viol,max_grad,nan").unwrap();
 
     println!("Starting extended diagnostic simulation (355 steps)...");

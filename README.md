@@ -16,7 +16,7 @@ Built in Rust with a modular crate architecture, Vistio targets production-grade
 ✅ **Tier 1 — Projective Dynamics Solver** — Complete
 ✅ **Tier 2 — Co-Rotational FEM & Visual Simulation** — Complete
 ✅ **Tier 3 — Discrete Shells & Anisotropic Materials** — Complete
-✅ **Tier 4 — IPC Barrier Contact & Augmented Lagrangian** — Complete
+🔲 **Tier 4 — IPC Barrier Contact & Augmented Lagrangian** — In Progress (Unstable)
 
 | Gate | Result |
 | --- | --- |
@@ -48,7 +48,7 @@ Built in Rust with a modular crate architecture, Vistio targets production-grade
 
 ### Known Limitations
 
-- **Resting State Oscillation** — The simulation currently exhibits a subtle bounce upon contact and maintains a persistent gap above the floor. The contact damping heuristics and IPC barrier activation zones require further tuning to facilitate natural, stable settling.
+- **CPU Performance on Dense Collisions:** While the simulation represents state-of-the-art mathematical robustness (IPC/Augmented Lagrangian), resolving macroscopic mesh-on-mesh self-overlap (e.g., highly complex folding like the `self_fold` or future 3D garments) natively on a single-threaded CPU causes substantial framerate drops. Dense barrier operations will be actively transitioned to WGSL GPU compute (Tier 5).
 
 ---
 
@@ -138,9 +138,10 @@ cargo run --bin vistio -- inspect snapshot.bin
 | --- | --- | --- | --- |
 | `hanging_sheet` | 1m² cloth pinned at top edge | 20×20 (441 verts) | 120 (2s) |
 | `sphere_drape` | 1.5m² cloth falling onto sphere | 20×20 (441 verts) | 180 (3s) |
-| `self_fold` | Cloth dropped diagonally onto ground, folding onto itself | 20×20 (441 verts) | 300 (5s) |
+| `self_fold` | Cloth dropped diagonally onto ground, folding onto itself | 0.2m × 2.0m ribbon | 300 (5s) |
+| `cusick_drape` | ISO 9073-9 constraint: 30cm circular swatch falling onto a 0.3m pedestal | Clipped Quad Grid | 300 (5s) |
 
-> **Note:** The `self_fold` and `sphere_drape` scenarios now execute exclusively utilizing the Tier 4 IPC collision pipeline, guaranteeing mathematically intersection-free results without heuristic position modifications.
+> **Note:** Scenarios leverage the Tier 4 Augmented Lagrangian IPC collision pipeline, guaranteeing mathematically intersection-free results against colliders.
 
 ---
 

@@ -1,9 +1,0 @@
-Starting extended diagnostic simulation (355 steps)...
-Step 0: iters=2, ke=0.010842, max_y=0.9973, max_speed=0.1569, max_viol=0.000000, nan=false
-Step 50: iters=20, ke=0.204249, max_y=0.3320, max_speed=1.3749, max_viol=0.000000, nan=false
-Step 100: iters=10, ke=0.097387, max_y=0.4266, max_speed=0.7776, max_viol=0.000000, nan=false
-Step 150: iters=10, ke=0.068540, max_y=0.4113, max_speed=0.9610, max_viol=0.000000, nan=false
-Step 200: iters=30, ke=3.637955, max_y=0.3926, max_speed=12.2900, max_viol=0.000000, nan=false
-Step 250: iters=30, ke=3.841181, max_y=0.6793, max_speed=14.7166, max_viol=0.000000, nan=false
-Step 300: iters=10, ke=0.195996, max_y=0.2232, max_speed=1.4008, max_viol=0.000000, nan=false
-Step 350: iters=10, ke=0.917219, max_y=4.7868, max_speed=1.5742, max_viol=0.000000, nan=false

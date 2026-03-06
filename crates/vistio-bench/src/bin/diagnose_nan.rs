@@ -38,7 +38,7 @@ impl<'a> IpcCollisionHandler for Handler<'a> {
 }
 
 fn main() -> VistioResult<()> {
-    let scenario = Scenario::sphere_drape();
+    let scenario = Scenario::self_fold();
     let n = scenario.garment.vertex_count();
     let topology = Topology::build(&scenario.garment);
 
@@ -60,8 +60,8 @@ fn main() -> VistioResult<()> {
         .with_ground(-0.3)
         .with_sphere(vistio_math::Vec3::new(0.0, 0.0, 0.0), 0.3);
 
-    println!("Starting diagnostic simulation (60 steps)...");
-    for step in 0..60 {
+    println!("Starting diagnostic simulation (400 steps)...");
+    for step in 0..400 {
         let mut handler = Handler {
             pipeline: &mut pipeline,
             mesh: &scenario.garment,

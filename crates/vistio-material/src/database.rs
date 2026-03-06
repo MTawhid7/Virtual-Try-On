@@ -24,11 +24,11 @@ impl MaterialDatabase {
             materials: HashMap::new(),
         };
 
-        db.register(cotton_twill());
-        db.register(silk_charmeuse());
-        db.register(denim_14oz());
-        db.register(jersey_knit());
-        db.register(chiffon());
+        db.register(FabricProperties::cotton_twill());
+        db.register(FabricProperties::silk_charmeuse());
+        db.register(FabricProperties::denim_14oz());
+        db.register(FabricProperties::jersey_knit());
+        db.register(FabricProperties::chiffon());
 
         db
     }
@@ -74,88 +74,89 @@ impl Default for MaterialDatabase {
 
 // ─── Built-in Fabric Presets ──────────────────────────────────────────
 
-/// Cotton Twill (200gsm) — Medium-weight woven fabric.
-/// Good all-rounder. Holds shape with defined folds.
-fn cotton_twill() -> FabricProperties {
-    FabricProperties {
-        name: "cotton_twill".into(),
-        density: 200.0,
-        stretch_stiffness_warp: 0.90,
-        stretch_stiffness_weft: 0.85,
-        shear_stiffness: 0.50,
-        bending_stiffness_warp: 0.50,
-        bending_stiffness_weft: 0.45,
-        thickness: 0.0008,
-        friction: 0.50,
-        damping: 0.02,
+impl FabricProperties {
+    /// Cotton Twill (200gsm) — Medium-weight woven fabric.
+    /// Good all-rounder. Holds shape with defined folds.
+    pub fn cotton_twill() -> Self {
+        FabricProperties {
+            name: "cotton_twill".into(),
+            density: 200.0,
+            stretch_stiffness_warp: 0.90,
+            stretch_stiffness_weft: 0.85,
+            shear_stiffness: 0.50,
+            bending_stiffness_warp: 0.50,
+            bending_stiffness_weft: 0.45,
+            thickness: 0.0008,
+            friction: 0.50,
+            damping: 0.02,
+        }
+    }
+
+    /// Silk Charmeuse (80gsm) — Lightweight, flowing, low structure.
+    /// Produces soft drapes with many small folds.
+    pub fn silk_charmeuse() -> Self {
+        FabricProperties {
+            name: "silk_charmeuse".into(),
+            density: 80.0,
+            stretch_stiffness_warp: 0.70,
+            stretch_stiffness_weft: 0.65,
+            shear_stiffness: 0.30,
+            bending_stiffness_warp: 0.10,
+            bending_stiffness_weft: 0.08,
+            thickness: 0.0004,
+            friction: 0.30,
+            damping: 0.01,
+        }
+    }
+
+    /// Denim 14oz (~400gsm) — Heavy, stiff woven fabric.
+    /// Resists deformation, produces sharp creases.
+    pub fn denim_14oz() -> Self {
+        FabricProperties {
+            name: "denim_14oz".into(),
+            density: 400.0,
+            stretch_stiffness_warp: 0.98,
+            stretch_stiffness_weft: 0.92,
+            shear_stiffness: 0.70,
+            bending_stiffness_warp: 0.85,
+            bending_stiffness_weft: 0.75,
+            thickness: 0.0014,
+            friction: 0.60,
+            damping: 0.03,
+        }
+    }
+
+    /// Jersey Knit (180gsm) — Stretchy knitted fabric.
+    /// High stretch, low bending stiffness, flowing drape.
+    pub fn jersey_knit() -> Self {
+        FabricProperties {
+            name: "jersey_knit".into(),
+            density: 180.0,
+            stretch_stiffness_warp: 0.50,
+            stretch_stiffness_weft: 0.60,
+            shear_stiffness: 0.25,
+            bending_stiffness_warp: 0.20,
+            bending_stiffness_weft: 0.25,
+            thickness: 0.0006,
+            friction: 0.40,
+            damping: 0.02,
+        }
+    }
+
+    /// Chiffon (50gsm) — Ultra-lightweight, sheer, flowing.
+    /// Minimal structure, maximum flow.
+    pub fn chiffon() -> Self {
+        FabricProperties {
+            name: "chiffon".into(),
+            density: 50.0,
+            stretch_stiffness_warp: 0.60,
+            stretch_stiffness_weft: 0.55,
+            shear_stiffness: 0.20,
+            bending_stiffness_warp: 0.05,
+            bending_stiffness_weft: 0.04,
+            thickness: 0.0003,
+            friction: 0.20,
+            damping: 0.005,
+        }
     }
 }
-
-/// Silk Charmeuse (80gsm) — Lightweight, flowing, low structure.
-/// Produces soft drapes with many small folds.
-fn silk_charmeuse() -> FabricProperties {
-    FabricProperties {
-        name: "silk_charmeuse".into(),
-        density: 80.0,
-        stretch_stiffness_warp: 0.70,
-        stretch_stiffness_weft: 0.65,
-        shear_stiffness: 0.30,
-        bending_stiffness_warp: 0.10,
-        bending_stiffness_weft: 0.08,
-        thickness: 0.0004,
-        friction: 0.30,
-        damping: 0.01,
-    }
-}
-
-/// Denim 14oz (~400gsm) — Heavy, stiff woven fabric.
-/// Resists deformation, produces sharp creases.
-fn denim_14oz() -> FabricProperties {
-    FabricProperties {
-        name: "denim_14oz".into(),
-        density: 400.0,
-        stretch_stiffness_warp: 0.98,
-        stretch_stiffness_weft: 0.92,
-        shear_stiffness: 0.70,
-        bending_stiffness_warp: 0.85,
-        bending_stiffness_weft: 0.75,
-        thickness: 0.0014,
-        friction: 0.60,
-        damping: 0.03,
-    }
-}
-
-/// Jersey Knit (180gsm) — Stretchy knitted fabric.
-/// High stretch, low bending stiffness, flowing drape.
-fn jersey_knit() -> FabricProperties {
-    FabricProperties {
-        name: "jersey_knit".into(),
-        density: 180.0,
-        stretch_stiffness_warp: 0.50,
-        stretch_stiffness_weft: 0.60,
-        shear_stiffness: 0.25,
-        bending_stiffness_warp: 0.20,
-        bending_stiffness_weft: 0.25,
-        thickness: 0.0006,
-        friction: 0.40,
-        damping: 0.02,
-    }
-}
-
-/// Chiffon (50gsm) — Ultra-lightweight, sheer, flowing.
-/// Minimal structure, maximum flow.
-fn chiffon() -> FabricProperties {
-    FabricProperties {
-        name: "chiffon".into(),
-        density: 50.0,
-        stretch_stiffness_warp: 0.60,
-        stretch_stiffness_weft: 0.55,
-        shear_stiffness: 0.20,
-        bending_stiffness_warp: 0.05,
-        bending_stiffness_weft: 0.04,
-        thickness: 0.0003,
-        friction: 0.20,
-        damping: 0.005,
-    }
-}
-
