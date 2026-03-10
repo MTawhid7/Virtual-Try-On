@@ -160,6 +160,8 @@ impl CylinderCollider {
                 } else if r > 1e-6 {
                     dd_dx = dx / r;
                     dd_dz = dz / r;
+                } else {
+                    dd_dx = 1.0; // Fallback normal to push out of exact center
                 }
                 1e-12 // Massive force
             } else if d_top > 0.0 && d_side <= 0.0 {
@@ -176,10 +178,12 @@ impl CylinderCollider {
             } else {
                 // Above and outside (near the rim)
                 if r > 1e-6 {
-                    let d = (d_side * d_side + d_top * d_top).sqrt();
+                    let d = (d_side * d_side + d_top * d_top).sqrt().max(1e-12);
                     dd_dx = (d_side / d) * (dx / r);
                     dd_dy = d_top / d;
                     dd_dz = (d_side / d) * (dz / r);
+                } else {
+                    dd_dy = 1.0;
                 }
                 d_side * d_side + d_top * d_top
             };
@@ -206,22 +210,36 @@ impl CylinderCollider {
         &self,
         prev_x: &[f32], prev_y: &[f32], prev_z: &[f32],
         new_x: &[f32], new_y: &[f32], new_z: &[f32],
+        padding: f32,
     ) -> f32 {
         let mut min_toi: f32 = 1.0;
-        let r2 = self.radius * self.radius;
+        let r_eff = self.radius + padding;
+        let r2 = r_eff * r_eff;
+        let top_eff = self.top_y + padding;
 
         for i in 0..prev_x.len() {
             let px0 = prev_x[i] - self.center_x;
-            let py0 = prev_y[i] - self.top_y;
+            let py0 = prev_y[i] - top_eff;
             let pz0 = prev_z[i] - self.center_z;
 
             let px1 = new_x[i] - self.center_x;
-            let py1 = new_y[i] - self.top_y;
+            let py1 = new_y[i] - top_eff;
             let pz1 = new_z[i] - self.center_z;
 
             let vx = px1 - px0;
             let vy = py1 - py0;
             let vz = pz1 - pz0;
+
+            // Check if vertex STARTS inside the padded cylinder
+            let start_r2 = px0 * px0 + pz0 * pz0;
+            if py0 <= 0.0 && start_r2 <= r2 {
+                let dot_pv = px0 * vx + pz0 * vz;
+                if dot_pv < 0.0 || vy < 0.0 {
+                    // Moving deeper into cylinder radially or downwards
+                    min_toi = 0.0;
+                }
+                continue;
+            }
 
             // 1. Check infinite cylinder wall intersection
             // (px0 + t*vx)^2 + (pz0 + t*vz)^2 = r^2
@@ -237,7 +255,8 @@ impl CylinderCollider {
                     if (0.0..=1.0).contains(&t_wall) {
                         // Is the hit below the top surface?
                         let y_hit = py0 + t_wall * vy;
-                        if y_hit <= 0.0 {
+                        // Avoid triggering CCD if moving away or parallel inside.
+                        if y_hit <= 1e-6 {
                             min_toi = min_toi.min(t_wall * 0.9); // 0.9 safety margin
                         }
                     }

@@ -3,9 +3,11 @@
 //! Uses vertex-triangle proximity tests for accurate collision detection.
 //! The pipeline:
 //! 1. **Broad phase**: Spatial hash → candidate vertex pairs
-//! 2. **Narrow phase**: For each pair (a,b), test vertex a against triangles
-//!    containing b (and vice versa), filtered by topology exclusion
-//! 3. **Resolution**: Push vertex out of triangle along the contact normal
+//! 2. **Topology exclusion**: BFS ring filter to remove immediate neighbors
+//! 3. **Resolution**: Mass-weighted position corrections per color batch
+
+pub mod coloring;
+pub mod exclusion;
 
 use vistio_math::Vec3;
 use vistio_mesh::TriangleMesh;
@@ -13,7 +15,7 @@ use vistio_mesh::topology::Topology;
 use vistio_solver::state::SimulationState;
 
 use crate::broad::BroadPhase;
-use crate::exclusion::TopologyExclusion;
+use self::exclusion::TopologyExclusion;
 
 /// Self-collision system: detect → resolve using vertex-triangle tests.
 pub struct SelfCollisionSystem {
@@ -213,7 +215,10 @@ impl SelfCollisionSystem {
 
         // We use triangle pairs from the BVH because IPC needs both
         // vertex-triangle and edge-edge contacts for robustness.
+        // We use triangle pairs from the BVH because IPC needs both
+        // vertex-triangle and edge-edge contacts for robustness.
         let tri_pairs = broad_phase.query_triangle_pairs();
+        // eprintln!("  [self_col] BVH returned {} tri pairs.", tri_pairs.len());
 
         for pair in tri_pairs {
             let [a0, a1, a2] = self.triangles[pair.ta as usize];
@@ -271,6 +276,7 @@ impl SelfCollisionSystem {
                 }
             }
         }
+        // eprintln!("  [self_col] Narrow phase finished. Found {} contacts.", ipc_set.len());
 
         ipc_set
     }

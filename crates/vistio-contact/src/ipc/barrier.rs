@@ -103,14 +103,22 @@ pub fn estimate_initial_kappa(
     if configured_kappa > 0.0 {
         return configured_kappa;
     }
-    // Evaluate the barrier gradient magnitude at the midpoint of the barrier zone
-    let d_mid = d_hat * 0.5;
-    let grad_at_mid = barrier_gradient(d_mid, d_hat).abs();
+
+    // Instead of using d_hat directly (which explodes kappa when d_hat is very small),
+    // use a characteristic distance (e.g. 1cm) or clamp the effective d_hat for kappa estimation.
+    let effective_d_hat = d_hat.max(1e-3); // Don't let kappa scale up infinitely for tiny zones
+
+    // Evaluate the barrier gradient magnitude at the midpoint of the effective barrier zone
+    let d_mid = effective_d_hat * 0.5;
+    let grad_at_mid = barrier_gradient(d_mid, effective_d_hat).abs();
+
     if grad_at_mid < 1e-12 {
         return 1e4; // fallback
     }
+
     // Force F = kappa * \nabla B(d) * (2 * sqrt(d)). We want F ≈ mass * gravity.
     let kappa = avg_mass * gravity_mag / (2.0 * d_mid.sqrt() * grad_at_mid);
+
     // Clamp to reasonable range
     kappa.clamp(1e0, 1e6)
 }

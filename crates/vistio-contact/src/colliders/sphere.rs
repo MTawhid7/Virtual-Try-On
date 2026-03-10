@@ -137,23 +137,35 @@ impl SphereCollider {
 
             if d_surface <= 0.0 {
                 // Inside the sphere -> violation!
-                // Violation is pure penetration depth.
                 max_violation = max_violation.max(-d_surface);
 
-                let d_clamped = (-d_surface).max(1e-6);
-                let dist_sq = d_clamped * d_clamped;
+                // Evaluate barrier at an infinitesimally small distance (1e-6) so it
+                // generates maximum repulsive force. Do NOT evaluate at penetration depth,
+                // because if depth > d_hat, the barrier function returns 0!
+                let dist_sq = 1e-12_f32;
                 active += 1;
                 let barrier_grad = crate::barrier::scaled_barrier_gradient(dist_sq, d_hat, kappa);
 
+                // Note: d_surface is NEGATIVE here. A negative gradient means energy decreases
+                // as distance INCREASES (which pushes the vertex outward).
+                let penalty = 1.0 * kappa * d_surface;
+
                 if r > 1e-6 {
-                    // Push outward along the radial direction
-                    let factor = barrier_grad * 2.0 * d_clamped;
+                    // chain rule: dE/dx = (barrier_grad * 2d + penalty) * (dx/r)
+                    let mut factor = barrier_grad * 2.0 * 1e-6 + penalty;
+
+                    // CRITICAL: The Augmented Lagrangian solver integrates this explicitly!
+                    // If the gradient exceeds the explicit mass-inertia limit, the solver will
+                    // explode geometrically. We MUST mathematically cap the maximum explicit gradient.
+                    factor = factor.max(-10.0).min(10.0);
+
                     grad_x[i] += factor * (dx / r);
                     grad_y[i] += factor * (dy / r);
                     grad_z[i] += factor * (dz / r);
                 } else {
-                    // Dead center, push randomly (up)
-                    grad_y[i] += barrier_grad * 2.0 * d_clamped;
+                    let mut factor = barrier_grad * 2.0 * 1e-6 + penalty;
+                    factor = factor.max(-10.0).min(10.0);
+                    grad_y[i] += factor;
                 }
             } else {
                 let dist_sq = d_surface * d_surface;
@@ -161,7 +173,9 @@ impl SphereCollider {
                     active += 1;
                     let barrier_grad = crate::barrier::scaled_barrier_gradient(dist_sq, d_hat, kappa);
 
-                    let factor = barrier_grad * 2.0 * d_surface;
+                    let mut factor = barrier_grad * 2.0 * d_surface;
+                    factor = factor.max(-500.0).min(50.0);
+
                     grad_x[i] += factor * (dx / r);
                     grad_y[i] += factor * (dy / r);
                     grad_z[i] += factor * (dz / r);
@@ -179,9 +193,11 @@ impl SphereCollider {
         &self,
         prev_x: &[f32], prev_y: &[f32], prev_z: &[f32],
         new_x: &[f32], new_y: &[f32], new_z: &[f32],
+        padding: f32,
     ) -> f32 {
         let mut min_toi: f32 = 1.0;
-        let r2 = self.radius * self.radius;
+        let r_eff = self.radius + padding;
+        let r2 = r_eff * r_eff;
 
         for i in 0..prev_x.len() {
             let px0 = prev_x[i] - self.center.x;
@@ -192,17 +208,21 @@ impl SphereCollider {
             let py1 = new_y[i] - self.center.y;
             let pz1 = new_z[i] - self.center.z;
 
-            // Check if vertex STARTS inside the sphere
-            let start_dist_sq = px0 * px0 + py0 * py0 + pz0 * pz0;
-            if start_dist_sq < r2 {
-                // Already penetrating — barrier forces will push out.
-                // Do NOT stall CCD for all vertices; skip this one.
-                continue;
-            }
-
             let vx = px1 - px0;
             let vy = py1 - py0;
             let vz = pz1 - pz0;
+
+            // Check if vertex STARTS inside the padded sphere
+            let start_dist_sq = px0 * px0 + py0 * py0 + pz0 * pz0;
+            if start_dist_sq < r2 {
+                let dot_pv = px0 * vx + py0 * vy + pz0 * vz;
+                if dot_pv < 0.0 {
+                    // Moving deeper into the barrier! Stop immediately.
+                    min_toi = 0.0;
+                }
+                // If dot_pv >= 0, moving outwards, skip CCD to let it exit.
+                continue;
+            }
 
             // (px0 + t*vx)^2 + (py0 + t*vy)^2 + (pz0 + t*vz)^2 = r^2
             let a = vx * vx + vy * vy + vz * vz;
@@ -212,10 +232,13 @@ impl SphereCollider {
             if a > 1e-8 {
                 let disc = b * b - 4.0 * a * c;
                 if disc >= 0.0 {
-                    // Smallest positive root is the entry time
-                    let t = (-b - disc.sqrt()) / (2.0 * a);
-                    if (0.0..=1.0).contains(&t) {
-                        min_toi = min_toi.min(t * 0.9);
+                     let t1 = (-b - disc.sqrt()) / (2.0 * a);
+
+                    // We ONLY care about the entry time (t1).
+                    // If t1 < 0, the vertex started inside the barrier (c < 0) and is exiting at t2.
+                    // We must NEVER clip exits (t2), otherwise IPC forces will trap vertices!
+                    if t1 > 0.0 && t1 < 1.0 {
+                        min_toi = min_toi.min(t1 * 0.9);
                     }
                 }
             }

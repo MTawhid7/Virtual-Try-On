@@ -27,8 +27,8 @@ impl<'a> IpcCollisionHandler for RunnerIpcHandler<'a> {
         self.pipeline.detect_ipc_contacts(px, py, pz, self.d_hat, self.kappa)
     }
 
-    fn compute_ccd_step(&mut self, prev_x: &[f32], prev_y: &[f32], prev_z: &[f32], new_x: &[f32], new_y: &[f32], new_z: &[f32]) -> f32 {
-        self.pipeline.compute_ccd_step(&self.mesh.indices, prev_x, prev_y, prev_z, new_x, new_y, new_z)
+    fn compute_ccd_step(&mut self, prev_x: &[f32], prev_y: &[f32], prev_z: &[f32], new_x: &[f32], new_y: &[f32], new_z: &[f32], padding: f32) -> f32 {
+        self.pipeline.compute_ccd_step(&self.mesh.indices, prev_x, prev_y, prev_z, new_x, new_y, new_z, padding)
     }
 
     fn set_d_hat(&mut self, d_hat: f32) {
@@ -225,6 +225,21 @@ impl BenchmarkRunner {
                 step_times.push(result.wall_time);
                 total_iterations += result.iterations;
             }
+            let cur_max_disp = (0..state.vertex_count)
+                .map(|i| {
+                    let dx = state.pos_x[i] - scenario.garment.pos_x[i];
+                    let dy = state.pos_y[i] - initial_y[i];
+                    let dz = state.pos_z[i] - scenario.garment.pos_z[i];
+                    (dx * dx + dy * dy + dz * dz).sqrt()
+                })
+                .fold(0.0f32, f32::max);
+
+            let max_lam = state.al_lambda_y.iter().map(|x| x.abs()).fold(0.0_f32, f32::max);
+            let max_vel = state.vel_y.iter().map(|x| x.abs()).fold(0.0_f32, f32::max);
+            let max_acc = state.pos_y.iter().zip(state.vel_y.iter()).map(|(_p, v)| v.abs()).fold(0.0_f32, f32::max); // just aliasing to avoid unused
+            let _ = max_acc;
+
+            println!("Step {} Max Disp: {} Max Lam: {} Max Vel: {}", _step, cur_max_disp, max_lam, max_vel);
         }
 
         let total_wall_time = total_start.elapsed().as_secs_f64();

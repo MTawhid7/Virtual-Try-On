@@ -25,9 +25,9 @@ The primary simulation loop is coordinated in integration modules like `vistio-v
 
 The workspace is logically decoupled into 14 modular crates. It is highly recommended to respect these strict boundaries to avoid circular dependencies or massive compiler invalidation.
 
-- **`vistio-bench`**: Integration harness executing offline canonical scenarios (`hanging_sheet`, `sphere_drape`, `self_fold`) and emitting metrics.
-- **`vistio-cli`**: Command Line Interface parsing arguments routing to various subcommands.
-- **`vistio-contact`**: Specialized physics logic for Bounding Volume Hierarchies, IPC log-barrier functions, CCD, and distance primitives.
+- **`vistio-bench`**: Integration harness executing offline canonical scenarios and emitting metrics. Scenarios organized into `scenarios/sheets.rs`, `scenarios/drapes.rs`, `scenarios/folds.rs`.
+- **`vistio-cli`**: Command Line Interface. Commands split into `commands/benchmark.rs`, `commands/visualize.rs`, `commands/inspect.rs`, `commands/validate.rs`.
+- **`vistio-contact`**: Collision detection and IPC contact. Organized into subdirectories: `colliders/` (sphere, cylinder, box, ground), `detection/` (broad, narrow, BVH, spatial hash), `ipc/` (barriers, CCD, distance primitives), `collision_pipeline/` (pipeline + IPC detection + CCD step), `self_collision/` (detection, coloring, topology exclusion).
 - **`vistio-debug`**: Snapshotting, state dumps, and diagnostic inspection hooks.
 - **`vistio-gpu`**: Traits, stubs, and buffers meant to facilitate eventual GPU (`wgpu`) data transfers.
 - **`vistio-io`**: Serialization tools and TOML configuration validators.
@@ -35,19 +35,21 @@ The workspace is logically decoupled into 14 modular crates. It is highly recomm
 - **`vistio-math`**: Linear algebra extensions, polar decomposition, and solver math (heavily extending `glam`).
 - **`vistio-mesh`**: Structure of Arrays (SoA) `TriangleMesh` management, vertex neighborhood topology queries, and procedural cloth generators.
 - **`vistio-render`**: Headless simulation traits preventing standard physics logic from depending directly on UI backends.
-- **`vistio-solver`**: The heavy lifting engine (`ProjectiveDynamicsSolver`, `SimulationState`, matrix assembly, and the constraint solver loops).
+- **`vistio-solver`**: The core solver engine. `pd_solver/` contains `mod.rs` (struct + init), `step.rs` (PD loop), `ipc.rs` (IPC types/traits), `al_step.rs` (Augmented Lagrangian step), `velocity_filter.rs` (post-solve filtering), `mass.rs`. FEM constraints organized in `constraints/` (element, assembly, bending, discrete_shells).
 - **`vistio-telemetry`**: Multi-threaded, lock-free `mpsc` metric and event publishing.
 - **`vistio-types`**: Fundamental type definitions, standard aliases, and universal IDs utilized throughout all crates.
-- **`vistio-viewer`**: Real-time interactive 3D simulation frontend bridging the physics core into a Bevy app context.
+- **`vistio-viewer`**: Bevy 3D viewer. Split into `lib.rs` (launch_viewer), `resources.rs` (ECS resources), `systems.rs` (simulation + scene setup), `ipc_handler.rs` (IPC bridge).
 
 ## 4. Key Data Structures (Where to go first)
 
 When attempting to understand or extend functionality, these locations are the recommended entry points:
 
 - **State Management**: `crates/vistio-solver/src/state.rs` (`SimulationState`)
-- **Core Physics Solver**: `crates/vistio-solver/src/pd_solver.rs` (`ProjectiveDynamicsSolver`)
-- **Collision Responses**: `crates/vistio-contact/src/...` (`CollisionPipeline`, `SphereCollider`, `GroundPlane`)
-- **Main Run Loops**: `crates/vistio-viewer/src/lib.rs` (`simulate_cloth` system) and `crates/vistio-bench/src/runner.rs` (`Runner`)
+- **Core Physics Solver**: `crates/vistio-solver/src/pd_solver/mod.rs` (`ProjectiveDynamicsSolver`)
+  - Standard step: `pd_solver/step.rs`, IPC/AL step: `pd_solver/al_step.rs`, Types: `pd_solver/ipc.rs`
+- **Collision Pipeline**: `crates/vistio-contact/src/collision_pipeline/mod.rs` (`CollisionPipeline`)
+  - IPC detection: `collision_pipeline/ipc_detection.rs`, CCD: `collision_pipeline/ccd_step.rs`
+- **Main Run Loops**: `crates/vistio-viewer/src/systems.rs` (`simulate_cloth` system) and `crates/vistio-bench/src/runner.rs` (`Runner`)
 
 ## 5. Recommended Patterns & Invariants
 

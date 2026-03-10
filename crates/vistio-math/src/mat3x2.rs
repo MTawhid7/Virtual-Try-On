@@ -48,6 +48,11 @@ impl Mat3x2 {
         let a = self.col0.dot(self.col0);
         let b = self.col0.dot(self.col1);
         let d = self.col1.dot(self.col1);
+
+        if !a.is_finite() || !b.is_finite() || !d.is_finite() {
+            return [0.0, 0.0, 0.0, 0.0];
+        }
+
         [a, b, b, d]
     }
 

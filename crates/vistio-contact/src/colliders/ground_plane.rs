@@ -80,25 +80,27 @@ impl GroundPlane {
 
             if d_surface <= 0.0 {
                 // Inside the ground -> violation!
-                // Violation magnitude is pure penetration depth
                 max_violation = max_violation.max(-d_surface);
 
-                // Use actual penetration depth (clamped to a small minimum to avoid
-                // division issues) so the restoring force is proportional to depth.
-                let d_clamped = (-d_surface).max(1e-6);
-                let dist_sq = d_clamped * d_clamped;
+                // Evaluate at 1e-12 to generate max repulsive force.
+                // Do NOT use penetration depth, as it evaluates to 0 if depth > d_hat.
+                let dist_sq = 1e-12_f32;
                 active += 1;
                 let barrier_grad = crate::barrier::scaled_barrier_gradient(dist_sq, d_hat, kappa);
 
-                // Force = -∇barrier.  barrier_grad is ∂b/∂(d²) which is negative (repulsive).
-                // The spatial chain rule: ∂b/∂y = ∂b/∂(d²) · ∂(d²)/∂y = barrier_grad · 2·d · 1
-                grad_y[i] += barrier_grad * 2.0 * d_clamped;
+                let penalty = 1.0 * kappa * d_surface;
+                let mut factor = barrier_grad * 2.0 * 1e-6 + penalty;
+                factor = factor.max(-10.0).min(10.0);
+                grad_y[i] += factor;
             } else {
                 let dist_sq = d_surface * d_surface;
                 if dist_sq < d_hat {
                     active += 1;
                     let barrier_grad = crate::barrier::scaled_barrier_gradient(dist_sq, d_hat, kappa);
-                    grad_y[i] += barrier_grad * 2.0 * d_surface;
+
+                    let mut factor = barrier_grad * 2.0 * d_surface;
+                    factor = factor.max(-500.0).min(50.0);
+                    grad_y[i] += factor;
 
                     // Do NOT report barrier-zone proximity as violation for AL loop
                     // as it causes infinite penalty growth.
@@ -113,6 +115,7 @@ impl GroundPlane {
         &self,
         prev_y: &[f32],
         new_y: &[f32],
+        padding: f32,
     ) -> f32 {
         let mut min_toi: f32 = 1.0;
 
@@ -120,9 +123,19 @@ impl GroundPlane {
             let py0 = prev_y[i];
             let py1 = new_y[i];
 
-            if py0 > self.height && py1 < self.height {
+            let eff_height = self.height + padding;
+
+            if py0 <= eff_height {
+                // Already inside padded zone. If moving closer to ground, stop.
+                if py1 < py0 {
+                    min_toi = 0.0;
+                }
+                continue;
+            }
+
+            if py0 > eff_height && py1 < eff_height {
                 let vy = py1 - py0;
-                let t = (self.height - py0) / vy;
+                let t = (eff_height - py0) / vy;
 
                 if (0.0..=1.0).contains(&t) {
                     min_toi = min_toi.min(t * 0.9);

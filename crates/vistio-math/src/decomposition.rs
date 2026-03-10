@@ -84,6 +84,15 @@ pub fn polar_decomposition_3x2(f: &Mat3x2) -> PolarDecomposition {
     let half_diff = 0.5 * (a - d);
     let disc = (half_diff * half_diff + b * b).sqrt();
 
+    if !disc.is_finite() {
+        return PolarDecomposition {
+            rotation: Mat3x2::IDENTITY,
+            stretch: [0.0, 0.0, 0.0, 0.0],
+            singular_values: (0.0, 0.0),
+            eigenvectors: (glam::Vec2::X, glam::Vec2::Y),
+        };
+    }
+
     let lambda0 = (half_trace + disc).max(0.0);
     let lambda1 = (half_trace - disc).max(0.0);
 
@@ -94,8 +103,20 @@ pub fn polar_decomposition_3x2(f: &Mat3x2) -> PolarDecomposition {
 
     if s0 < eps {
         // Fully degenerate — return identity-like decomposition
+        let mut r = Mat3x2::IDENTITY;
+        // If F isn't completely zero, we can extract an orientation
+        if f.col0.length_squared() > 1e-10 && f.col1.length_squared() > 1e-10 {
+            let u = f.col0.normalize();
+            let mut v = f.col1 - u * f.col1.dot(u);
+            if v.length_squared() > 1e-10 {
+                v = v.normalize();
+                r.col0 = u;
+                r.col1 = v;
+            }
+        }
+
         return PolarDecomposition {
-            rotation: Mat3x2::IDENTITY,
+            rotation: r,
             stretch: [0.0, 0.0, 0.0, 0.0],
             singular_values: (0.0, 0.0),
             eigenvectors: (glam::Vec2::X, glam::Vec2::Y),
@@ -119,7 +140,7 @@ pub fn polar_decomposition_3x2(f: &Mat3x2) -> PolarDecomposition {
     let s11 = v0.y * v0.y * s0 + v1.y * v1.y * s1;
 
     // S_inv = V * diag(1/s0, 1/s1) * V^T
-    let inv_s0 = 1.0 / s0;
+    let inv_s0 = if s0 > eps { 1.0 / s0 } else { 0.0 };
     let inv_s1 = if s1 > eps { 1.0 / s1 } else { 0.0 };
 
     let si00 = v0.x * v0.x * inv_s0 + v1.x * v1.x * inv_s1;

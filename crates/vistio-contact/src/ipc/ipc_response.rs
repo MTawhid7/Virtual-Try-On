@@ -178,16 +178,28 @@ impl IpcContactSet {
         let mut grad_y = vec![0.0_f32; n_vertices];
         let mut grad_z = vec![0.0_f32; n_vertices];
 
+        let mut iter_count = 0;
         for contact in &self.contacts {
+            iter_count += 1;
+            if iter_count % 5000 == 0 {
+                // eprintln!("    [ipc_response] compute gradient: {}/{}", iter_count, self.contacts.len());
+            }
+
             let d_sq = self.recompute_distance(contact, pos_x, pos_y, pos_z);
 
             // dE/d(d²): barrier gradient w.r.t. squared distance
-            // C-IPC: self-collision contacts use thickness-aware barrier (Phase 3.1)
+            // CRITICAL: The Augmented Lagrangian PD solver integrates these forces EXPLICITLY!
+            // If the barrier gradient goes arbitrarily high due to deep proximity, the explicit
+            // Euler step will exceed the stability limit (M/dt²) and explode geometrically.
+            // We clamp the maximum mathematical gradient to prevent the system from tearing apart.
             let barrier_grad = if contact.is_self && self.thickness > 0.0 {
                 barrier::scaled_barrier_gradient_with_thickness(d_sq, self.d_hat, self.kappa, self.thickness)
             } else {
                 barrier::scaled_barrier_gradient(d_sq, self.d_hat, self.kappa)
             };
+
+            // Limit the raw gradient magnitude to respect the solver's explicit stability boundary.
+            let barrier_grad = barrier_grad.max(-500.0).min(50.0);
 
             // d(d²)/d(vertex positions): distance gradient w.r.t. vertex positions
             let dist_grads = self.compute_distance_gradient(contact, pos_x, pos_y, pos_z);
@@ -226,7 +238,13 @@ impl IpcContactSet {
         pos_z: &[f32],
     ) -> f32 {
         let mut max_violation = 0.0_f32;
+        let mut iter_count = 0;
+        // eprintln!("  [ipc_response] starting violation check...");
         for contact in &self.contacts {
+            iter_count += 1;
+            if iter_count % 5000 == 0 {
+                // eprintln!("    [ipc_response] violation check: {}/{}", iter_count, self.contacts.len());
+            }
             let d_sq = self.recompute_distance(contact, pos_x, pos_y, pos_z);
             // Violation is absolute penetration depth.
             // For point-triangle and edge-edge distances, unsigned distance squared means

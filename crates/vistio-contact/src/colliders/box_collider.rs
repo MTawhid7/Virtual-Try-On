@@ -203,8 +203,16 @@ impl BoxCollider {
         &self,
         prev_x: &[f32], prev_y: &[f32], prev_z: &[f32],
         new_x: &[f32], new_y: &[f32], new_z: &[f32],
+        padding: f32,
     ) -> f32 {
         let mut min_toi: f32 = 1.0;
+
+        let min_x_eff = self.min_x - padding;
+        let max_x_eff = self.max_x + padding;
+        let min_y_eff = self.min_y - padding;
+        let max_y_eff = self.max_y + padding;
+        let min_z_eff = self.min_z - padding;
+        let max_z_eff = self.max_z + padding;
 
         for i in 0..prev_x.len() {
             let px0 = prev_x[i];
@@ -218,6 +226,19 @@ impl BoxCollider {
             let vx = px1 - px0;
             let vy = py1 - py0;
             let vz = pz1 - pz0;
+
+            if px0 >= min_x_eff && px0 <= max_x_eff &&
+               py0 >= min_y_eff && py0 <= max_y_eff &&
+               pz0 >= min_z_eff && pz0 <= max_z_eff {
+                let cx = (self.min_x + self.max_x) * 0.5;
+                let cy = (self.min_y + self.max_y) * 0.5;
+                let cz = (self.min_z + self.max_z) * 0.5;
+                let dot_pv = (px0 - cx) * vx + (py0 - cy) * vy + (pz0 - cz) * vz;
+                if dot_pv < 0.0 {
+                    min_toi = 0.0;
+                }
+                continue;
+            }
 
             let mut t_min = 0.0_f32;
             let mut t_max = 1.0_f32;
@@ -237,9 +258,9 @@ impl BoxCollider {
                 }
             };
 
-            if check_axis(px0, vx, self.min_x, self.max_x, &mut t_min, &mut t_max) &&
-               check_axis(py0, vy, self.min_y, self.max_y, &mut t_min, &mut t_max) &&
-               check_axis(pz0, vz, self.min_z, self.max_z, &mut t_min, &mut t_max)
+            if check_axis(px0, vx, min_x_eff, max_x_eff, &mut t_min, &mut t_max) &&
+               check_axis(py0, vy, min_y_eff, max_y_eff, &mut t_min, &mut t_max) &&
+               check_axis(pz0, vz, min_z_eff, max_z_eff, &mut t_min, &mut t_max)
 
                 && (0.0..=1.0).contains(&t_min) {
                     // It entered the box during this frame!

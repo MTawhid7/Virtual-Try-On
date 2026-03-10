@@ -10,15 +10,19 @@
 //! - [`ProjectiveDynamicsStub`] — Tier-0 stub solver (no-op local step)
 //! - [`element::ElementData`] — FEM element precomputation (Tier 1)
 
-pub mod assembly;
-pub mod bending;
+pub mod constraints;
 pub mod config;
-pub mod discrete_shells;
-pub mod element;
 pub mod pd_solver;
 pub mod pd_stub;
 pub mod state;
 pub mod strategy;
+
+// Backward-compatible re-exports from the constraints subdirectory.
+// All existing `crate::element`, `crate::assembly`, etc. paths continue to work.
+pub use constraints::assembly;
+pub use constraints::bending;
+pub use constraints::discrete_shells;
+pub use constraints::element;
 
 pub use config::SolverConfig;
 pub use pd_solver::ProjectiveDynamicsSolver;
