@@ -109,6 +109,7 @@ impl CollisionPipeline {
 
     // ─── Per-collider IPC detection helpers ──────────────────
 
+    #[allow(clippy::too_many_arguments)]
     fn detect_self_collision_ipc(
         &mut self,
         pos_x: &[f32], pos_y: &[f32], pos_z: &[f32],
@@ -145,6 +146,7 @@ impl CollisionPipeline {
         }
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn detect_ground_ipc(
         &self,
         pos_y: &[f32], d_hat: f32, kappa: f32,
@@ -176,6 +178,7 @@ impl CollisionPipeline {
         }
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn detect_sphere_ipc(
         &self,
         pos_x: &[f32], pos_y: &[f32], pos_z: &[f32],
@@ -220,6 +223,7 @@ impl CollisionPipeline {
         }
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn detect_cylinder_ipc(
         &self,
         pos_x: &[f32], pos_y: &[f32], pos_z: &[f32],
@@ -288,6 +292,7 @@ impl CollisionPipeline {
         }
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn detect_box_ipc(
         &self,
         pos_x: &[f32], pos_y: &[f32], pos_z: &[f32],

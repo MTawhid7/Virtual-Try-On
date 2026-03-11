@@ -90,7 +90,7 @@ impl GroundPlane {
 
                 let penalty = 1.0 * kappa * d_surface;
                 let mut factor = barrier_grad * 2.0 * 1e-6 + penalty;
-                factor = factor.max(-10.0).min(10.0);
+                factor = factor.clamp(-10.0, 10.0);
                 grad_y[i] += factor;
             } else {
                 let dist_sq = d_surface * d_surface;
@@ -99,7 +99,7 @@ impl GroundPlane {
                     let barrier_grad = crate::barrier::scaled_barrier_gradient(dist_sq, d_hat, kappa);
 
                     let mut factor = barrier_grad * 2.0 * d_surface;
-                    factor = factor.max(-500.0).min(50.0);
+                    factor = factor.clamp(-500.0, 50.0);
                     grad_y[i] += factor;
 
                     // Do NOT report barrier-zone proximity as violation for AL loop

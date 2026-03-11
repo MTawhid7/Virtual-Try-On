@@ -99,6 +99,7 @@ impl SphereCollider {
     }
 
     /// Compute IPC barrier gradients for vertices near the sphere.
+    #[allow(clippy::too_many_arguments)]
     pub fn detect_ipc_contacts(
         &self,
         pos_x: &[f32],
@@ -157,14 +158,14 @@ impl SphereCollider {
                     // CRITICAL: The Augmented Lagrangian solver integrates this explicitly!
                     // If the gradient exceeds the explicit mass-inertia limit, the solver will
                     // explode geometrically. We MUST mathematically cap the maximum explicit gradient.
-                    factor = factor.max(-10.0).min(10.0);
+                    factor = factor.clamp(-10.0, 10.0);
 
                     grad_x[i] += factor * (dx / r);
                     grad_y[i] += factor * (dy / r);
                     grad_z[i] += factor * (dz / r);
                 } else {
                     let mut factor = barrier_grad * 2.0 * 1e-6 + penalty;
-                    factor = factor.max(-10.0).min(10.0);
+                    factor = factor.clamp(-10.0, 10.0);
                     grad_y[i] += factor;
                 }
             } else {
@@ -174,7 +175,7 @@ impl SphereCollider {
                     let barrier_grad = crate::barrier::scaled_barrier_gradient(dist_sq, d_hat, kappa);
 
                     let mut factor = barrier_grad * 2.0 * d_surface;
-                    factor = factor.max(-500.0).min(50.0);
+                    factor = factor.clamp(-100.0, 100.0);
 
                     grad_x[i] += factor * (dx / r);
                     grad_y[i] += factor * (dy / r);
@@ -189,6 +190,7 @@ impl SphereCollider {
     }
 
     /// Compute maximum safe step size to prevent vertices from entering the sphere.
+    #[allow(clippy::too_many_arguments)]
     pub fn compute_ccd_step(
         &self,
         prev_x: &[f32], prev_y: &[f32], prev_z: &[f32],

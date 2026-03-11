@@ -24,10 +24,9 @@ impl Scenario {
 
         let config = SolverConfig {
             ipc_enabled: true,
-            // Larger barrier zone so cloth decelerates gradually before contact.
-            // Default 1e-3 (~3cm zone) is too small for free-fall at ~2.6 m/s (4.3cm/frame).
-            // 0.01 gives ~10cm activation zone, preventing barrier zone overshoot.
-            barrier_d_hat: 0.01,
+            // 1e-4 gives ~1cm activation zone for close-contact draping.
+            // CCD line search prevents barrier overshoot during free-fall.
+            barrier_d_hat: 1e-4,
             barrier_kappa: 0.0, // adaptive estimation
             al_max_iterations: 15,
             ..Default::default()
@@ -42,7 +41,7 @@ impl Scenario {
             timesteps: 180, // 3 seconds
             dt: 1.0 / 60.0,
             vertex_mass: 0.002,
-            material: None,
+            material: Some(vistio_material::FabricProperties::cotton_twill()),
         }
     }
 
@@ -51,9 +50,9 @@ impl Scenario {
     /// ISO 9073-9 Cusick drape test: circular specimen of radius 15cm
     /// drops onto a 9cm-radius cylinder pedestal.
     pub fn cusick_drape() -> Self {
-        // Reduced resolution from 64×15 to 32×10 to prevent CPU bottleneck
-        // from excessive contact pair generation (was 150k+ at higher res).
-        let mut garment = vistio_mesh::generators::circular_grid(0.15, 32, 10);
+        // Higher resolution for realistic fold formation around cylinder edge.
+        // 48×15 gives enough elements to buckle and form radial pleats.
+        let mut garment = vistio_mesh::generators::circular_grid(0.15, 48, 15);
         let n = garment.vertex_count();
         for i in 0..n {
             garment.pos_z[i] = garment.pos_y[i];
@@ -76,8 +75,8 @@ impl Scenario {
             config,
             timesteps: 300,
             dt: 1.0 / 60.0,
-            vertex_mass: 0.002,
-            material: None,
+            vertex_mass: 0.001,
+            material: Some(vistio_material::FabricProperties::jersey_knit()),
         }
     }
 }

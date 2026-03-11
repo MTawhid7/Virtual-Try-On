@@ -104,6 +104,7 @@ impl BoxCollider {
     }
 
     /// Compute IPC barrier gradients for vertices near the box.
+    #[allow(clippy::too_many_arguments)]
     pub fn detect_ipc_contacts(
         &self,
         pos_x: &[f32],
@@ -199,6 +200,7 @@ impl BoxCollider {
     }
 
     /// Compute maximum safe step size to prevent vertices from passing into the box.
+    #[allow(clippy::too_many_arguments)]
     pub fn compute_ccd_step(
         &self,
         prev_x: &[f32], prev_y: &[f32], prev_z: &[f32],

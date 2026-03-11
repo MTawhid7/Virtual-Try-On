@@ -8,6 +8,7 @@ use super::CollisionPipeline;
 impl CollisionPipeline {
     /// Compute the maximum safe step fraction to prevent any vertex from passing
     /// through a collision boundary explicitly modelled by IPC.
+    #[allow(clippy::too_many_arguments)]
     pub fn compute_ccd_step(
         &self,
         mesh_indices: &[u32],
@@ -18,7 +19,7 @@ impl CollisionPipeline {
         let mut min_toi = 1.0_f32;
 
         // 1. Self Collision
-        if let Some(_) = self.self_collision {
+        if self.self_collision.is_some() {
             let tri_pairs = self.broad.query_triangle_pairs();
             let tri_pairs_usize: Vec<(usize, usize)> = tri_pairs.into_iter().map(|p| (p.ta as usize, p.tb as usize)).collect();
             let toi = crate::ccd::compute_max_step_size(

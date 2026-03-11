@@ -52,7 +52,7 @@ fn main() -> VistioResult<()> {
     let mut solver = ProjectiveDynamicsSolver::new();
     solver.init(&scenario.garment, &topology, &scenario.config, &scenario.pinned)?;
 
-    let mut state = SimulationState::from_mesh(&scenario.garment, scenario.vertex_mass.clone(), &scenario.pinned)?;
+    let mut state = SimulationState::from_mesh(&scenario.garment, scenario.vertex_mass, &scenario.pinned)?;
 
     let config = scenario.config.clone();
     let mut pipeline = CollisionPipeline::new(

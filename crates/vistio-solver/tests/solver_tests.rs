@@ -806,6 +806,63 @@ fn discrete_shells_rest_angle_flat_mesh() {
 }
 
 #[test]
+fn cantilever_bending_displacement_with_scaled_stiffness() {
+    let cols = 10;
+    let rows = 40;
+    // Create cantilever mesh
+    let mut mesh = vistio_mesh::generators::quad_grid(cols, rows, 0.10, 0.40);
+    let n = mesh.vertex_count();
+    
+    // Shift Z and Y to match folds.rs geometry
+    for i in 0..n {
+        mesh.pos_z[i] = mesh.pos_y[i] - 0.16;
+        mesh.pos_y[i] = 0.501;
+    }
+    
+    // Pin first ~12 rows
+    let mut pinned = vec![false; n];
+    for (i, p) in pinned.iter_mut().enumerate().take(n) {
+        if mesh.pos_z[i] <= -0.04 {
+            *p = true;
+        }
+    }
+    
+    let topology = Topology::build(&mesh);
+    let config = SolverConfig {
+        max_iterations: 10,
+        ..Default::default()
+    };
+    
+    let db = MaterialDatabase::with_defaults();
+    let props = db.get("cotton_twill").unwrap();
+    let model = Box::new(CoRotationalModel::new());
+    
+    let mut solver = ProjectiveDynamicsSolver::new();
+    // Assuming Tier 4 so that Discrete Shells is fully mapped
+    solver.init_with_material_tier4(&mesh, &topology, &config, props, model, &pinned).unwrap();
+    
+    let total_area = 0.10 * 0.40;
+    let vm = props.mass_per_vertex(n, total_area);
+    let mut state = SimulationState::from_mesh(&mesh, vm, &pinned).unwrap();
+    
+    let dt = 1.0 / 60.0;
+    for _ in 0..120 {
+        solver.step(&mut state, dt).unwrap();
+    }
+    
+    // Measure lowest Y point. It started at 0.501.
+    // With proper scaled bending stiffness in place, it should bend significantly.
+    // If it's rigid, min_y will be ~0.50. If bending, min_y should be < 0.30.
+    let min_y = state.pos_y.iter().fold(f32::INFINITY, |a, &b| a.min(b));
+    println!("Cantilever min Y after 120 steps: {}", min_y);
+    assert!(
+        min_y < 0.45, 
+        "Cantilever frame is too rigid! Fabric didn't bend enough. min_y = {}",
+        min_y
+    );
+}
+
+#[test]
 fn discrete_shells_cotangent_weights_finite() {
     let mesh = quad_grid(3, 3, 1.0, 1.0);
     let topo = Topology::build(&mesh);
@@ -977,8 +1034,10 @@ fn fabric_properties_warp_weft_ratio() {
 fn tier4_solver_init_succeeds() {
     let mesh = quad_grid(5, 5, 1.0, 1.0);
     let topology = Topology::build(&mesh);
-    let mut config = SolverConfig::default();
-    config.ipc_enabled = true;
+    let config = SolverConfig {
+        ipc_enabled: true,
+        ..Default::default()
+    };
     let db = MaterialDatabase::with_defaults();
     let props = db.get("cotton_twill").unwrap();
     let model = Box::new(CoRotationalModel::new());

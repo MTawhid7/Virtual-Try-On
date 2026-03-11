@@ -140,7 +140,7 @@ impl Default for SolverConfig {
             contact_weight: 1.0,
             chebyshev_acceleration: false,
             spectral_radius: 0.5,
-            rayleigh_mass_damping: 2.0,
+            rayleigh_mass_damping: 0.5,
             material_name: None,
             // IPC defaults — disabled unless explicitly enabled
             barrier_d_hat: 1e-3,  // ~3cm activation zone (squared distance)
@@ -151,12 +151,12 @@ impl Default for SolverConfig {
             ccd_enabled: true,
             al_max_iterations: 10,
             al_mu_initial: 1.0,
-            al_mu_growth: 10.0,
+            al_mu_growth: 2.0,
             al_tolerance: 1e-4,
             friction_coefficient: 0.4,
             contact_damping: 0.3,
             // Phase 3: Compliant contact defaults
-            compliant_contact: true,
+            compliant_contact: false,
             compliant_d_hat_scale: 2.0,
             adaptive_contact_damping: true,
             contact_damping_max: 0.5,

@@ -35,15 +35,51 @@ pub fn launch_viewer(scenario: Scenario) -> Result<(), Box<dyn std::error::Error
     let mut solver = ProjectiveDynamicsSolver::new();
 
     let vertex_mass: f32 = if let Some(ref properties) = scenario.material {
-        let model = Box::new(CoRotationalModel::new());
-        solver.init_with_material(
-            &scenario.garment,
-            &topology,
-            &scenario.config,
-            properties,
-            model,
-            &scenario.pinned,
-        ).map_err(|e| format!("Solver init failed: {e}"))?;
+        if properties.is_anisotropic() {
+            // Anisotropic: Tier 3/4 with Discrete Shells + anisotropic co-rotational model
+            let model = Box::new(vistio_material::AnisotropicCoRotationalModel::from_properties(properties));
+            if scenario.config.ipc_enabled {
+                solver.init_with_material_tier4(
+                    &scenario.garment,
+                    &topology,
+                    &scenario.config,
+                    properties,
+                    model,
+                    &scenario.pinned,
+                ).map_err(|e| format!("Solver init failed: {e}"))?;
+            } else {
+                solver.init_with_material_tier3(
+                    &scenario.garment,
+                    &topology,
+                    &scenario.config,
+                    properties,
+                    model,
+                    &scenario.pinned,
+                ).map_err(|e| format!("Solver init failed: {e}"))?;
+            }
+        } else {
+            // Isotropic: Tier 2/4 with dihedral bending + co-rotational model
+            let model = Box::new(CoRotationalModel::new());
+            if scenario.config.ipc_enabled {
+                solver.init_with_material_tier4(
+                    &scenario.garment,
+                    &topology,
+                    &scenario.config,
+                    properties,
+                    model,
+                    &scenario.pinned,
+                ).map_err(|e| format!("Solver init failed: {e}"))?;
+            } else {
+                solver.init_with_material(
+                    &scenario.garment,
+                    &topology,
+                    &scenario.config,
+                    properties,
+                    model,
+                    &scenario.pinned,
+                ).map_err(|e| format!("Solver init failed: {e}"))?;
+            }
+        }
 
         let total_area: f32 = {
             use bevy::prelude::Vec3;

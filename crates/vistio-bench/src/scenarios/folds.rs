@@ -12,24 +12,36 @@ impl Scenario {
         let mut garment = vistio_mesh::generators::quad_grid(cols, rows, 0.10, 0.40);
         let n = garment.vertex_count();
         for i in 0..n {
-            garment.pos_z[i] = garment.pos_y[i] + 0.20; // z: [0.0, 0.40]
-            garment.pos_y[i] = 0.5; // Starts resting on the shelf at y=0.5
+            // Shift Z so ~40% rests on the box ledge (z < 0) and ~60% overhangs (z > 0).
+            // Box ledge extends from z=-0.2 to z=0.0, so fabric from z=-0.16 to z=+0.24.
+            garment.pos_z[i] = garment.pos_y[i] - 0.16;
+            // Place slightly above box top (y=0.499) so IPC barriers aren't immediately active.
+            garment.pos_y[i] = 0.501;
         }
         let mut pinned = vec![false; n];
-        // Pin the first three rows (which are situated on the shelf)
-        for item in pinned.iter_mut().take(3 * (cols + 1)) {
-            *item = true;
+        // Pin vertices that are within the box ledge region (z <= -0.04).
+        // This pins the first ~12 rows of 41 rows (row spacing = 0.40/40 = 0.01m).
+        for (i, p) in pinned.iter_mut().enumerate().take(n) {
+            if garment.pos_z[i] <= -0.04 {
+                *p = true;
+            }
         }
         Self {
             kind: ScenarioKind::CantileverBending,
             garment,
             body: None,
             pinned,
-            config: SolverConfig::default(),
+            config: SolverConfig {
+                ipc_enabled: true,
+                barrier_d_hat: 1e-4,
+                barrier_kappa: 0.0,
+                al_max_iterations: 10,
+                ..Default::default()
+            },
             timesteps: 300,
             dt: 1.0 / 60.0,
             vertex_mass: 0.001,
-            material: None,
+            material: Some(vistio_material::FabricProperties::cotton_twill()),
         }
     }
 

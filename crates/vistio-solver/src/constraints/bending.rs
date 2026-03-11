@@ -127,9 +127,18 @@ impl BendingData {
                 rest_angle
             };
 
-            // Weight based on edge length (longer edges = more influence)
-            let edge_len = (p_v1 - p_v0).length();
-            let weight = stiffness * edge_len;
+            // Weight: area-normalized bending energy (consistent with Discrete Shells).
+            // w_b = k_b · 3 · ē² / A_e
+            let edge = p_v1 - p_v0;
+            let edge_len = edge.length();
+            let e1_a = p_v1 - p_wa;
+            let e2_a = p_v0 - p_wa;
+            let area_a = 0.5 * e1_a.cross(e2_a).length();
+            let e1_b = p_v1 - p_wb;
+            let e2_b = p_v0 - p_wb;
+            let area_b = 0.5 * e1_b.cross(e2_b).length();
+            let combined_area = (area_a + area_b).max(1e-8);
+            let weight = stiffness * 3.0 * edge_len * edge_len / combined_area;
 
             elements.push(BendingElement {
                 v0,
@@ -157,7 +166,7 @@ impl BendingData {
         topology: &Topology,
         properties: &vistio_material::FabricProperties,
     ) -> Self {
-        let stiffness = properties.avg_bending_stiffness() * 100.0;
+        let stiffness = properties.avg_bending_stiffness() * 1e-4; // Temporary physical scaling test
         Self::from_topology(mesh, topology, stiffness)
     }
 

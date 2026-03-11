@@ -9,6 +9,7 @@
 
 pub trait IpcCollisionHandler {
     fn detect_contacts(&mut self, pos_x: &[f32], pos_y: &[f32], pos_z: &[f32]) -> IpcBarrierForces;
+    #[allow(clippy::too_many_arguments)]
     fn compute_ccd_step(&mut self, prev_x: &[f32], prev_y: &[f32], prev_z: &[f32], new_x: &[f32], new_y: &[f32], new_z: &[f32], padding: f32) -> f32;
     /// Set the effective d_hat (barrier activation zone) for subsequent calls.
     /// Used by the solver to implement compliant contact (Phase 3.2).

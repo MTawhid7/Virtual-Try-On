@@ -199,7 +199,7 @@ impl IpcContactSet {
             };
 
             // Limit the raw gradient magnitude to respect the solver's explicit stability boundary.
-            let barrier_grad = barrier_grad.max(-500.0).min(50.0);
+            let barrier_grad = barrier_grad.clamp(-100.0, 100.0);
 
             // d(d²)/d(vertex positions): distance gradient w.r.t. vertex positions
             let dist_grads = self.compute_distance_gradient(contact, pos_x, pos_y, pos_z);

@@ -117,7 +117,7 @@ impl ProjectiveDynamicsSolver {
             let mut final_contact_nz = vec![0.0_f32; n];
 
             // OUTER LOOP: Augmented Lagrangian
-            let mut previous_violation = std::f32::MAX;
+            let mut previous_violation = f32::MAX;
             for _al_iter in 0..self.config.al_max_iterations {
 
                 // Detect contacts at current positions
@@ -245,6 +245,7 @@ impl ProjectiveDynamicsSolver {
     /// Run the PD inner local-global loop for a single AL iteration.
     ///
     /// Returns (iterations_run, final_residual).
+    #[allow(clippy::too_many_arguments)]
     fn run_pd_inner_loop<H: IpcCollisionHandler>(
         &self,
         state: &mut SimulationState,
@@ -448,6 +449,7 @@ impl ProjectiveDynamicsSolver {
     }
 
     /// Compute bending projection targets for all bending elements.
+    #[allow(clippy::type_complexity)]
     fn compute_bending_projections(
         &self,
         state: &SimulationState,
@@ -488,17 +490,3 @@ impl ProjectiveDynamicsSolver {
     }
 }
 
-/// Compute the maximum velocity magnitude across all free vertices.
-fn compute_max_speed(state: &SimulationState, n: usize) -> f32 {
-    let mut max_speed = 0.0_f32;
-    for i in 0..n {
-        if state.inv_mass[i] == 0.0 { continue; }
-        let v_sq = state.vel_x[i] * state.vel_x[i]
-            + state.vel_y[i] * state.vel_y[i]
-            + state.vel_z[i] * state.vel_z[i];
-        if v_sq > max_speed * max_speed {
-            max_speed = v_sq.sqrt();
-        }
-    }
-    max_speed
-}

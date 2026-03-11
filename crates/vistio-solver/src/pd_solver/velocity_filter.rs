@@ -15,6 +15,7 @@ use crate::state::SimulationState;
 /// 1. Remove normal velocity (inelastic collision)
 /// 2. Apply Coulomb friction to tangential velocity
 /// 3. Apply contact-specific damping
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn apply_contact_velocity_filter(
     state: &mut SimulationState,
     config: &SolverConfig,

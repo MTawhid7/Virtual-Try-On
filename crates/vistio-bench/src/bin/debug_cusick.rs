@@ -59,7 +59,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         &scenario.garment,
         &topology,
         &scenario.config,
-        &vistio_material::database::MaterialDatabase::with_defaults().get("cotton_twill").unwrap(),
+        vistio_material::database::MaterialDatabase::with_defaults().get("cotton_twill").unwrap(),
         Box::new(CoRotationalModel::new()),
         &scenario.pinned,
     )?;

@@ -29,11 +29,14 @@
 //!
 //! ## Weight Scaling
 //!
-//! The PD weight per bending element uses the same magnitude as the
-//! proven dihedral model (`stiffness * edge_len`). The improved curvature
-//! estimation comes from the cotangent-weighted stencil coefficients, NOT
-//! from scaling the weight by 3/A_e (which produces catastrophically large
-//! values that make the system ill-conditioned).
+//! Per Grinspun et al. 2003, the PD weight for each bending element is:
+//!
+//!   w_b = k_b · 3 · ē² / A_e
+//!
+//! where ē is the rest edge length and A_e is the combined area of the
+//! two adjacent triangles. This area-normalization makes the bending
+//! energy resolution-independent: refining the mesh does not change the
+//! effective bending stiffness.
 //!
 //! ## Geometry
 //!
@@ -70,10 +73,10 @@ pub struct DiscreteShellsElement {
     pub combined_area: f32,
     /// Cotangent-weighted Laplacian stencil coefficients for [v0, v1, wa, wb].
     /// These encode the curvature operator for this edge.
-    /// Normalized so that the stencil vector has unit L2 norm.
+    /// NOT normalized — raw geometric coefficients preserve physical area scaling.
     pub stencil: [f32; 4],
     /// Bending stiffness weight for the PD system matrix.
-    /// w_b = stiffness · edge_len (matching dihedral model magnitude)
+    /// w_b = stiffness · 3 · edge_len² / combined_area (Grinspun 2003)
     pub weight: f32,
 }
 
@@ -97,12 +100,12 @@ impl DiscreteShellsBendingData {
     ///
     /// For each interior edge, computes:
     /// - Rest dihedral angle from initial geometry
-    /// - Cotangent-weighted Laplacian stencil (normalized)
-    /// - Combined triangle area for reference
+    /// - Cotangent-weighted Laplacian stencil (raw, unnormalized)
+    /// - Combined triangle area for area-normalized weight
     ///
     /// The cotangent weights come from the angles opposite the shared edge
-    /// in each adjacent triangle. The stencil is normalized to unit L2 norm
-    /// so that the weight alone controls the energy magnitude.
+    /// in each adjacent triangle. The stencil preserves raw geometric
+    /// coefficients for physically correct area-dependent curvature.
     pub fn from_topology(
         mesh: &TriangleMesh,
         topology: &Topology,
@@ -160,21 +163,22 @@ impl DiscreteShellsBendingData {
             let c_1 = -dot1_a * c_wa - dot1_b * c_wb;
 
             // Raw geometric stencil: [c_0, c_1, c_wa, c_wb]
-            // Normalized to unit L2 norm so the weight alone controls energy magnitude.
-            let raw = [c_0, c_1, c_wa, c_wb];
-            let norm = (raw[0] * raw[0] + raw[1] * raw[1] + raw[2] * raw[2] + raw[3] * raw[3]).sqrt();
-            let stencil = if norm > 1e-10 {
-                [raw[0] / norm, raw[1] / norm, raw[2] / norm, raw[3] / norm]
-            } else {
-                // Fallback to uniform stencil for degenerate geometry
-                let s = 0.5_f32;
-                [-s, -s, s, s]
+            // NOT normalized — preserves physical area-dependent curvature scaling.
+            let stencil = {
+                let norm = (c_0 * c_0 + c_1 * c_1 + c_wa * c_wa + c_wb * c_wb).sqrt();
+                if norm > 1e-10 {
+                    [c_0, c_1, c_wa, c_wb]
+                } else {
+                    // Fallback to uniform stencil for degenerate geometry
+                    let s = 0.5_f32;
+                    [-s, -s, s, s]
+                }
             };
 
-            // Weight: match dihedral model magnitude (stiffness * edge_len).
-            // The improved curvature estimation comes from the cotangent stencil
-            // direction, not from scaling the weight.
-            let weight = stiffness * edge_len;
+            // Weight: area-normalized bending energy per Grinspun 2003.
+            // w_b = k_b · 3 · ē² / A_e
+            // This makes bending stiffness resolution-independent.
+            let weight = stiffness * 3.0 * edge_len * edge_len / combined_area;
 
             elements.push(DiscreteShellsElement {
                 v0,
@@ -203,7 +207,7 @@ impl DiscreteShellsBendingData {
         topology: &Topology,
         properties: &vistio_material::FabricProperties,
     ) -> Self {
-        let stiffness = properties.avg_bending_stiffness() * 100.0;
+        let stiffness = properties.avg_bending_stiffness() * 1e-4; // Temporary physical scaling test
         Self::from_topology(mesh, topology, stiffness)
     }
 
@@ -222,9 +226,9 @@ impl DiscreteShellsBendingData {
         properties: &vistio_material::FabricProperties,
     ) -> Self {
         // Use the average bending stiffness as the base, then modulate per-edge.
-        let k_avg = properties.avg_bending_stiffness() * 100.0;
-        let k_warp = properties.bending_stiffness_warp;
-        let k_weft = properties.bending_stiffness_weft;
+        let k_avg = properties.avg_bending_stiffness() * 1e-4;
+        let k_warp = properties.bending_stiffness_warp * 1e-4;
+        let k_weft = properties.bending_stiffness_weft * 1e-4;
         let avg_raw = (k_warp + k_weft) / 2.0;
 
         let mut data = Self::from_topology(mesh, topology, k_avg);

@@ -118,6 +118,7 @@ impl CylinderCollider {
     }
 
     /// Compute IPC barrier gradients for vertices near the cylinder.
+    #[allow(clippy::too_many_arguments)]
     pub fn detect_ipc_contacts(
         &self,
         pos_x: &[f32],
@@ -206,6 +207,7 @@ impl CylinderCollider {
     }
 
     /// Compute maximum safe step size for vertices to prevent passing through the cylinder.
+    #[allow(clippy::too_many_arguments)]
     pub fn compute_ccd_step(
         &self,
         prev_x: &[f32], prev_y: &[f32], prev_z: &[f32],
