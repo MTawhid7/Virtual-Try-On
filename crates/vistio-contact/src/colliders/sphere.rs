@@ -158,14 +158,14 @@ impl SphereCollider {
                     // CRITICAL: The Augmented Lagrangian solver integrates this explicitly!
                     // If the gradient exceeds the explicit mass-inertia limit, the solver will
                     // explode geometrically. We MUST mathematically cap the maximum explicit gradient.
-                    factor = factor.clamp(-10.0, 10.0);
+                    factor = factor.clamp(-30.0, 30.0);
 
                     grad_x[i] += factor * (dx / r);
                     grad_y[i] += factor * (dy / r);
                     grad_z[i] += factor * (dz / r);
                 } else {
                     let mut factor = barrier_grad * 2.0 * 1e-6 + penalty;
-                    factor = factor.clamp(-10.0, 10.0);
+                    factor = factor.clamp(-30.0, 30.0);
                     grad_y[i] += factor;
                 }
             } else {
@@ -175,7 +175,7 @@ impl SphereCollider {
                     let barrier_grad = crate::barrier::scaled_barrier_gradient(dist_sq, d_hat, kappa);
 
                     let mut factor = barrier_grad * 2.0 * d_surface;
-                    factor = factor.clamp(-100.0, 100.0);
+                    factor = factor.clamp(-30.0, 30.0);
 
                     grad_x[i] += factor * (dx / r);
                     grad_y[i] += factor * (dy / r);
@@ -195,13 +195,13 @@ impl SphereCollider {
         &self,
         prev_x: &[f32], prev_y: &[f32], prev_z: &[f32],
         new_x: &[f32], new_y: &[f32], new_z: &[f32],
-        padding: f32,
-    ) -> f32 {
+        padding: f32, alphas: &mut [f32]) -> f32 {
         let mut min_toi: f32 = 1.0;
         let r_eff = self.radius + padding;
         let r2 = r_eff * r_eff;
 
         for i in 0..prev_x.len() {
+            alphas[i] = 1.0;
             let px0 = prev_x[i] - self.center.x;
             let py0 = prev_y[i] - self.center.y;
             let pz0 = prev_z[i] - self.center.z;
@@ -221,6 +221,7 @@ impl SphereCollider {
                 if dot_pv < 0.0 {
                     // Moving deeper into the barrier! Stop immediately.
                     min_toi = 0.0;
+                    alphas[i] = 0.0;
                 }
                 // If dot_pv >= 0, moving outwards, skip CCD to let it exit.
                 continue;
@@ -240,10 +241,13 @@ impl SphereCollider {
                     // If t1 < 0, the vertex started inside the barrier (c < 0) and is exiting at t2.
                     // We must NEVER clip exits (t2), otherwise IPC forces will trap vertices!
                     if t1 > 0.0 && t1 < 1.0 {
-                        min_toi = min_toi.min(t1 * 0.9);
+                        let safe_t = t1 * 0.9;
+                        min_toi = min_toi.min(safe_t);
+                        alphas[i] = safe_t.max(1e-6);
                     }
                 }
             }
+            alphas[i] = alphas[i].max(1e-6);
         }
         min_toi.max(1e-6)
     }

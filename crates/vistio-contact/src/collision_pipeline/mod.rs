@@ -198,6 +198,86 @@ impl CollisionPipeline {
             self_collision_result,
         })
     }
+
+    /// Project penetrating vertices back to collider surfaces.
+    ///
+    /// This is the position-based collision response used by the PD inner loop.
+    /// Instead of penalty forces (which are unstable with the constant PD matrix),
+    /// we directly project any penetrating vertex to the nearest point on the
+    /// collider surface. This is inherently stable and produces natural draping.
+    pub fn project_positions(&self, pos_x: &mut [f32], pos_y: &mut [f32], pos_z: &mut [f32]) {
+        let n = pos_x.len();
+
+        // Ground plane
+        if let Some(ref ground) = self.ground {
+            for i in 0..n {
+                if pos_y[i] < ground.height {
+                    pos_y[i] = ground.height + 1e-4;
+                }
+            }
+        }
+
+        // Sphere collider
+        if let Some(ref sphere) = self.sphere {
+            let padded_radius = sphere.radius + 1e-4;
+            for i in 0..n {
+                let dx = pos_x[i] - sphere.center.x;
+                let dy = pos_y[i] - sphere.center.y;
+                let dz = pos_z[i] - sphere.center.z;
+                let r = (dx * dx + dy * dy + dz * dz).sqrt();
+                if r < padded_radius && r > 1e-8 {
+                    // Project to sphere surface with padding
+                    let scale = padded_radius / r;
+                    pos_x[i] = sphere.center.x + dx * scale;
+                    pos_y[i] = sphere.center.y + dy * scale;
+                    pos_z[i] = sphere.center.z + dz * scale;
+                }
+            }
+        }
+
+        // Cylinder collider
+        if let Some(ref cylinder) = self.cylinder {
+            for i in 0..n {
+                let dx = pos_x[i] - cylinder.center_x;
+                let dz = pos_z[i] - cylinder.center_z;
+                let r = (dx * dx + dz * dz).sqrt();
+                if r < cylinder.radius && pos_y[i] < cylinder.top_y && r > 1e-8 {
+                    let scale = cylinder.radius / r;
+                    pos_x[i] = cylinder.center_x + dx * scale;
+                    pos_z[i] = cylinder.center_z + dz * scale;
+                }
+            }
+        }
+
+        // Box collider
+        if let Some(ref box_col) = self.box_collider {
+            for i in 0..n {
+                if pos_x[i] > box_col.min_x && pos_x[i] < box_col.max_x
+                    && pos_y[i] > box_col.min_y && pos_y[i] < box_col.max_y
+                    && pos_z[i] > box_col.min_z && pos_z[i] < box_col.max_z
+                {
+                    // Project to nearest face
+                    let dists = [
+                        (pos_x[i] - box_col.min_x).abs(),
+                        (box_col.max_x - pos_x[i]).abs(),
+                        (pos_y[i] - box_col.min_y).abs(),
+                        (box_col.max_y - pos_y[i]).abs(),
+                        (pos_z[i] - box_col.min_z).abs(),
+                        (box_col.max_z - pos_z[i]).abs(),
+                    ];
+                    let min_idx = dists.iter().enumerate().min_by(|a, b| a.1.partial_cmp(b.1).unwrap()).unwrap().0;
+                    match min_idx {
+                        0 => pos_x[i] = box_col.min_x,
+                        1 => pos_x[i] = box_col.max_x,
+                        2 => pos_y[i] = box_col.min_y,
+                        3 => pos_y[i] = box_col.max_y,
+                        4 => pos_z[i] = box_col.min_z,
+                        _ => pos_z[i] = box_col.max_z,
+                    }
+                }
+            }
+        }
+    }
 }
 
 /// Result of a full collision pipeline step.

@@ -195,7 +195,8 @@ impl CylinderCollider {
 
                 // Chain rule: dE/dx = dE/d(d²) * d(d²)/dx = barrier_grad * 2 * d * dd_dx
                 let d = dist_sq.sqrt();
-                let factor = barrier_grad * 2.0 * d;
+                let mut factor = barrier_grad * 2.0 * d;
+                factor = factor.clamp(-30.0, 30.0);
 
                 grad_x[i] += factor * dd_dx;
                 grad_y[i] += factor * dd_dy;
@@ -212,7 +213,7 @@ impl CylinderCollider {
         &self,
         prev_x: &[f32], prev_y: &[f32], prev_z: &[f32],
         new_x: &[f32], new_y: &[f32], new_z: &[f32],
-        padding: f32,
+        padding: f32, alphas: &mut [f32]
     ) -> f32 {
         let mut min_toi: f32 = 1.0;
         let r_eff = self.radius + padding;
@@ -220,6 +221,7 @@ impl CylinderCollider {
         let top_eff = self.top_y + padding;
 
         for i in 0..prev_x.len() {
+            alphas[i] = 1.0;
             let px0 = prev_x[i] - self.center_x;
             let py0 = prev_y[i] - top_eff;
             let pz0 = prev_z[i] - self.center_z;
@@ -239,6 +241,7 @@ impl CylinderCollider {
                 if dot_pv < 0.0 || vy < 0.0 {
                     // Moving deeper into cylinder radially or downwards
                     min_toi = 0.0;
+                    alphas[i] = 0.0;
                 }
                 continue;
             }
@@ -259,7 +262,9 @@ impl CylinderCollider {
                         let y_hit = py0 + t_wall * vy;
                         // Avoid triggering CCD if moving away or parallel inside.
                         if y_hit <= 1e-6 {
-                            min_toi = min_toi.min(t_wall * 0.9); // 0.9 safety margin
+                            let safe_t = t_wall * 0.9;
+                            min_toi = min_toi.min(safe_t); // 0.9 safety margin
+                            alphas[i] = alphas[i].min(safe_t);
                         }
                     }
                 }
@@ -274,10 +279,13 @@ impl CylinderCollider {
                     let x_hit = px0 + t_top * vx;
                     let z_hit = pz0 + t_top * vz;
                     if x_hit * x_hit + z_hit * z_hit <= r2 {
-                        min_toi = min_toi.min(t_top * 0.9);
+                        let safe_t = t_top * 0.9;
+                        min_toi = min_toi.min(safe_t);
+                        alphas[i] = alphas[i].min(safe_t);
                     }
                 }
             }
+            alphas[i] = alphas[i].max(1e-6);
         }
 
         min_toi.max(1e-6)

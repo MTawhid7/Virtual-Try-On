@@ -10,10 +10,13 @@
 pub trait IpcCollisionHandler {
     fn detect_contacts(&mut self, pos_x: &[f32], pos_y: &[f32], pos_z: &[f32]) -> IpcBarrierForces;
     #[allow(clippy::too_many_arguments)]
-    fn compute_ccd_step(&mut self, prev_x: &[f32], prev_y: &[f32], prev_z: &[f32], new_x: &[f32], new_y: &[f32], new_z: &[f32], padding: f32) -> f32;
+    fn compute_ccd_step(&mut self, prev_x: &[f32], prev_y: &[f32], prev_z: &[f32], new_x: &[f32], new_y: &[f32], new_z: &[f32], padding: f32, alphas: &mut [f32]) -> f32;
     /// Set the effective d_hat (barrier activation zone) for subsequent calls.
     /// Used by the solver to implement compliant contact (Phase 3.2).
     fn set_d_hat(&mut self, _d_hat: f32) {}
+    /// Project penetrating vertices back to collider surfaces.
+    /// This is the position-based collision response for the PD inner loop.
+    fn project_positions(&mut self, _pos_x: &mut [f32], _pos_y: &mut [f32], _pos_z: &mut [f32]) {}
 }
 
 pub struct EmptyIpcHandler;
@@ -21,7 +24,7 @@ impl IpcCollisionHandler for EmptyIpcHandler {
     fn detect_contacts(&mut self, px: &[f32], _py: &[f32], _pz: &[f32]) -> IpcBarrierForces {
         IpcBarrierForces::empty(px.len())
     }
-    fn compute_ccd_step(&mut self, _px: &[f32], _py: &[f32], _pz: &[f32], _nx: &[f32], _ny: &[f32], _nz: &[f32], _padding: f32) -> f32 {
+    fn compute_ccd_step(&mut self, _px: &[f32], _py: &[f32], _pz: &[f32], _nx: &[f32], _ny: &[f32], _nz: &[f32], _padding: f32, alphas: &mut [f32]) -> f32 {
         1.0
     }
 }

@@ -103,7 +103,9 @@ impl ElementData {
         mesh: &TriangleMesh,
         properties: &vistio_material::FabricProperties,
     ) -> Self {
-        let stiffness = properties.avg_stretch_stiffness() * 10.0; // scale down slightly so it balances with the local projection instead of overpowering it
+        // With pure ARAP projection (cs=1.0) and per-vertex CCD,
+        // we can safely use the higher physical stiffness without the mesh freezing.
+        let stiffness = properties.avg_stretch_stiffness() * 50.0;
         Self::from_mesh(mesh, stiffness)
     }
 

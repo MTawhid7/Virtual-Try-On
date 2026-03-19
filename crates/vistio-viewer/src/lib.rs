@@ -148,7 +148,10 @@ pub fn launch_viewer(scenario: Scenario) -> Result<(), Box<dyn std::error::Error
             ground_height = 0.0; // Floor at y=0.0
             pipeline = pipeline
                 .with_ground(0.0)
-                .with_box(-0.1, 0.1, 0.0, 0.499, -0.2, 0.0);
+                // Box matches the new cantilever strip support surface:
+                // 2.5cm wide (X: -0.015..0.015), 50cm tall (Y: 0..0.499),
+                // 10cm deep (Z: -0.10..0.0). Ledge ends at Z=0.
+                .with_box(-0.015, 0.015, 0.0, 0.499, -0.10, 0.0);
         },
         _ => {
             ground_height = -0.3;

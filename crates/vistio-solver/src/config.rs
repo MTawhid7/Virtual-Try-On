@@ -138,7 +138,7 @@ impl Default for SolverConfig {
             stretch_weight: 1.0,
             bending_weight: 0.5,
             contact_weight: 1.0,
-            chebyshev_acceleration: false,
+            chebyshev_acceleration: true,
             spectral_radius: 0.5,
             rayleigh_mass_damping: 0.5,
             material_name: None,

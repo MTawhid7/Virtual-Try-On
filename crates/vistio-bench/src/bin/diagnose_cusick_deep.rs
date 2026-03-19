@@ -43,8 +43,8 @@ impl<'a> IpcCollisionHandler for Handler<'a> {
         self.last_max_hess = max_h;
         forces
     }
-    fn compute_ccd_step(&mut self, px0: &[f32], py0: &[f32], pz0: &[f32], px1: &[f32], py1: &[f32], pz1: &[f32], padding: f32) -> f32 {
-        let toi = self.pipeline.compute_ccd_step(&self.mesh.indices, px0, py0, pz0, px1, py1, pz1, padding);
+    fn compute_ccd_step(&mut self, px0: &[f32], py0: &[f32], pz0: &[f32], px1: &[f32], py1: &[f32], pz1: &[f32], padding: f32, _alphas: &mut [f32]) -> f32 {
+        let toi = self.pipeline.compute_ccd_step(&self.mesh.indices, px0, py0, pz0, px1, py1, pz1, padding, _alphas);
         self.last_ccd_toi = self.last_ccd_toi.min(toi);
         toi
     }

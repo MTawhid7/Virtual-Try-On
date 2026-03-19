@@ -229,15 +229,18 @@ fn isotropic_model_name() {
 // ─── Tension-Field Theory Tests ───────────────────────────────
 
 #[test]
-fn corotational_compression_zero_energy() {
-    // Tension-field theory: compressive deformation should produce zero energy.
-    // A uniform 0.5× compression (σ₁ = σ₂ = 0.5) should create no restoring force.
+fn corotational_compression_buckling_energy() {
+    // With pure ARAP (cs=1.0), returning s_target=1.0 creates significant
+    // compressive stress (symmetric to stretching). We accept this compression
+    // penalty because using tension-field theory in a constant-matrix PD solver
+    // causes massive viscous drag. We allow draping by keeping membrane stiffness
+    // globally low instead.
     let model = CoRotationalModel::new();
     let f = Mat3x2::from_cols(Vec3::X * 0.5, Vec3::Y * 0.5);
     let result = model.project(&f, 1.0, 1.0);
     assert!(
-        result.energy < 1e-6,
-        "Compressed element should have ~0 energy with tension-field, got {}",
+        result.energy > 0.1,
+        "Compressed element must have positive energy to induce buckling, got {}",
         result.energy
     );
 }
@@ -258,21 +261,22 @@ fn corotational_stretch_still_penalized() {
 #[test]
 fn corotational_mixed_compression_stretch() {
     // One direction compressed (σ₁ = 0.5), one stretched (σ₂ = 1.5).
-    // Only the stretched direction should contribute energy.
     let model = CoRotationalModel::new();
     let f = Mat3x2::from_cols(Vec3::X * 0.5, Vec3::Y * 1.5);
     let result = model.project(&f, 1.0, 1.0);
     assert!(
         result.energy > 0.0,
-        "Mixed deformation should have some energy from stretch, got {}",
+        "Mixed deformation should have positive energy, got {}",
         result.energy
     );
-    // Energy should be less than pure stretch (only one direction contributes)
+    // Under pure ARAP, compression from 1.0 to 0.5 costs the same as stretch from 1.0 to 1.5.
     let pure_stretch = Mat3x2::from_cols(Vec3::X * 1.5, Vec3::Y * 1.5);
     let pure_result = model.project(&pure_stretch, 1.0, 1.0);
+    
+    let diff = (result.energy - pure_result.energy).abs();
     assert!(
-        result.energy < pure_result.energy,
-        "Mixed should have less energy than pure stretch: {} vs {}",
+        diff < 1e-6,
+        "ARAP penalizes compression and stretch symmetrically. Expected equality, got {} vs {}",
         result.energy,
         pure_result.energy
     );
@@ -353,13 +357,13 @@ fn anisotropic_corotational_identity_zero_energy() {
 }
 
 #[test]
-fn anisotropic_corotational_compression_zero_energy() {
-    // Tension-field theory should still work: compression → zero energy
+fn anisotropic_corotational_compression_buckling_energy() {
+    // Like the isotropic model, returning 1.0 creates significant compressive stress.
     let model = AnisotropicCoRotationalModel::new(1.0, 0.5);
     let f = Mat3x2::from_cols(Vec3::X * 0.5, Vec3::Y * 0.5);
     let result = model.project(&f, 1.0, 1.0);
-    assert!(result.energy < 1e-6,
-        "Compressed element should have ~0 energy with tension-field, got {}",
+    assert!(result.energy > 0.01,
+        "Compressed element must have positive energy to induce buckling, got {}",
         result.energy);
 }
 

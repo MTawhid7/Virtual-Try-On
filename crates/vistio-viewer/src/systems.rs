@@ -308,13 +308,13 @@ pub(crate) fn setup_scene(
                 perceptual_roughness: 0.9,
                 ..default()
             });
-            // Box is min_x=-0.1, max_x=0.1, min_y=0.0, max_y=0.5, min_z=-0.2, max_z=0.0
-            // Size: (0.2, 0.5, 0.2)
-            // Center is (0.0, 0.25, -0.1)
+            // Box collider: X=[-0.015,0.015], Y=[0,0.499], Z=[-0.10,0]
+            // Size: (0.03, 0.499, 0.10)
+            // Center: (0.0, 0.2495, -0.05)
             commands.spawn(PbrBundle {
-                mesh: meshes.add(Cuboid::new(0.2, 0.5, 0.2)),
+                mesh: meshes.add(Cuboid::new(0.03, 0.499, 0.10)),
                 material: ledge_material,
-                transform: Transform::from_xyz(0.0, 0.25, -0.1),
+                transform: Transform::from_xyz(0.0, 0.2495, -0.05),
                 ..default()
             });
         },

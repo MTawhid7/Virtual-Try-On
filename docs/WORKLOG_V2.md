@@ -144,3 +144,105 @@ The current state strongly indicates that while the internal energy formulation 
 - **Membrane Scaling**: Audit `element.rs` for the isotropic stretch stiffness mappings (e.g., `avg_stretch_stiffness() * 10.0`). The stretch weights are likely dominating the system just as the bending weights were, preventing the local projection from breaking the planar shape constraints.
 - **Damping & Augmented Lagrangian Penalties**: Inspect if the global $\mu$ multiplier in the IPC pipeline is so large that the AL step enforces absolute stiffness instead of allowing the cloth to yield naturally under gravitational pull.
 - **Solver Constraint Ordering**: Check if solving membrane strings *after* bending limits curvature, maintaining the horizontal sheets seen in the screenshots.
+
+## 2026-03-12 (Stability Over-Correction and "Lifeless" Simulation Analysis)
+
+### 1. Everything Done So Far
+
+Following the "chewing gum" stretching and "hat" spike explosions, we shifted our focus to **numerical robustness and parameter retuning**.
+
+- **Stiffness Recalibration Hierarchy**:
+  - We attempted a wide range of $MEMBRANE\_BASE$ values ($50,000$ down to $100$) and $BENDING\_BASE$ values ($0.5$ down to $0.01$).
+  - The goal was to find a "Goldilocks" zone where the fabric is inextensible enough to not stretch like chewing gum, but soft enough for gravity to induce bending.
+- **Contact Force Clamping**:
+  - Implemented strict symmetric gradient clamping in `SphereCollider`, `CylinderCollider`, and `BoxCollider` (capped at `[-30, 30]`).
+  - This successfully eliminated the catastrophic NaNs and $10^6m$ vertex displacements.
+- **Solver Logic Verification**:
+  - Confirmed the solver initializes from `prev_x` (previous stabilized state) rather than `pred_x` (inertia-projected state), preventing penetrations from being baked into the initial guess.
+  - Fixed a scoping bug in the `BoxCollider` IPC response that was causing compilation failures.
+- **Scenario Optimization**:
+  - Updated the `CusickDrape` resolution to $64 \times 20$ to allow for higher-detail fold formation.
+  - Refined the `CantileverBending` scenario with smarter pinning and overhang ratios.
+
+### 2. Current Status: Stability vs. Realism Paradox
+
+The Vistio engine is now **critically stable but functionally lifeless**.
+
+- **Stability**: The simulation is remarkably robust. All scenarios run to completion (300+ frames) with zero jitter, zero explosions, and zero NaNs.
+- **Realism**: The fabric has lost all textile behavior. In the viewer, the garments (Sphere Drape, Cusick, Cantilever) appear as perfectly horizontal, perfectly planar rigid boards.
+- **The Observation**: Even at "hyper-soft" debug settings ($MEMBRANE=100$, $BENDING=0.01$) and with IPC disabled, the fabric refuses to sag under its own weight. It behaves as though the elastic forces (or the solver's constant matrix) have completely locked out the gravitational degrees of freedom.
+
+### 3. Issues & Technical Analysis
+
+- **Stiffness Dominance (Inertia Mismatch)**: In Projective Dynamics, the system matrix is $A = (M/h^2) + K$. Because our vertex masses $M$ are very small (based on realistic g/m²), and our stiffness $K$ is based on KES parameters, the $K$ term is dominating the matrix. The solver essentially ignores the $M/h^2$ term (and thus gravity), converging to the rest state (flat) every frame.
+- **Numerical Locking**: The ARAP (As-Rigid-As-Possible) local step in PD is converging to the "flat" rest state so strongly that the small gravitational delta in the RHS of the equation is lost in floating-point precision or suppressed by the constant pre-factorized matrix.
+- **Clamping Suppression**: The `[-30, 30]` gradient clamping, while great for stability, may be truncating the very forces needed to initiate a buckling fold. In Cusick drapes, the "kick" required to bend the edge is non-linear and might be getting "clipped" before it can take effect.
+- **Reporting Anomaly**: The CLI benchmarks report passing metrics (stability, drape coefficients) even when the visual state is clearly incorrect. The "displacement" calculation might be misinterpreting the relative motion of the mesh centroid vs. individual vertex sag.
+
+### 4. Detailed Future Plan
+
+To break out of this "rigid board" state, the following strategy is proposed:
+
+1. **Fundamental Unit & Scale Audit**:
+   - Re-evaluate the meter/kilogram/second scaling. If $M/h^2$ is $10^{-6}$ and $K$ is $10^3$, the solver is effectively solving $Kx = b$. We may need to artificially boost vertex mass or switch to a more dynamic "Position Based Dynamics" (PBD) approach for the local step to ensure gravity has a voice.
+2. **Energy-Balance Diagnostics**:
+   - Implement per-frame reporting of **Gravitational Potential Energy (GPE)** vs. **Elastic Strain Energy (ESE)**.
+   - We need to see exactly at what point GPE is being swallowed by the stiffness terms.
+3. **Adaptive Stiffness/Warm-up phase**:
+   - Introduce a "soft start" where stiffness is gradually ramped up over the first 60 frames. If the cloth sags during the soft phase but "freezes" later, we have confirmed a stiffness-dominance issue.
+4. **Constraint Relaxation Audit**:
+   - Investigate "bending-stretch coupling." If the membrane constraints are too tight, they can sometimes prevent bending even if the bending stiffness is low (triangular locking).
+5. **Enhanced Local Step Targets**:
+   - Modify the PD local step to be "gravity-aware" or "history-aware," encouraging the projection targets to favor the direction of external forces when the elastic gradient is near zero.
+6. **Unified Collision/Self-Collision (Tier 5)**:
+   - Accelerate the transition to GPU-based self-collision. Realistic draping often requires the friction and thickness of the cloth to act as a counter-balance to itself; without this, the "perfectly thin" mathematical sheets are more prone to numerical locking.
+
+## 2026-03-13 (Phase 3 Audit: Stability vs. Dynamics Paradox)
+
+### 1. Implementation Summary (The "9 Anomalies" Audit)
+
+A exhaustive audit was performed across all 14 crates to resolve the "lifeless vs. unstable" conflict.
+
+**Critical Stability Fixes Implemented:**
+- **AL Initialization**: Switched from `prev` to **CCD-clamped `pred`** initialization. We found that blindly using `pred` caused explosions (vertices inside colliders), while `prev` deprived the solver of gravity momentum. Clamping `pred` via CCD provides the best of both: a safe, yet gravity-aware, initial guess.
+- **CCD Safety Margins**: Restored `0.5` padding and `0.8` alpha safety factors.
+- **Global Damping**: Restored `0.05` damping during contact.
+
+**Dynamic Result:** The simulation is now **bulletproof**. It no longer NaNs or explodes even under fast contact.
+
+---
+
+### 2. Remaining Anomalies: The "Damping-by-Projection" Discovery
+
+Despite numerical stability, the cloth exhibits a "non-cooperative" physical behavior:
+
+1. **Sphere Drape "Stiff Indentation"**: Only the contact point deforms; the rest of the sheet stays horizontal.
+2. **Cusick "Shrinking"**: The cloth appears to crumple into a ball or shrink toward the center.
+3. **Cantilever "Rebound"**: The strip bends at the ledge but then bends *upward* to stay horizontal.
+
+#### **Core Hypothesis: The Implicit Damping Artifact**
+An architectural mismatch was identified in the **Bending Identity Fix**. To prevent the cloth from "fighting" gravity to stay flat, we modified the bending projection to return the *current positions* (identity) for flat rest angles.
+
+**The Mechanical Flaw:**
+In a pre-factorized Projective Dynamics (PD) solver, the system matrix **$A$** is constant and includes the full bending stiffness weights on the diagonal. The equation is $(M/dt^2 + \sum K_i) q = (M/dt^2 q_{pred} + \sum K_i p_i)$.
+
+By setting $p_i = q_{current}$ (the identity projection), the bending term effectively becomes a **strong drag force** that pulls the vertex back to its position in the previous iteration. It doesn't just resist bending change; it resists **any motion** because $K_bending$ is competing with $M/dt^2$ on the RHS.
+
+**Result**: The bending model, intended to be "turned off," actually converted itself into a **massive numerical shock absorber** that tethers every flat region to its current coordinate, preventing gravity from winning.
+
+---
+
+### 3. Debugging Insights & Observations
+
+- **Membrane/Bending Conflict**: The `*200` membrane multiplier (scaled down from `*500`) provides inextensibility, but when coupled with the "Damping-by-Projection" artifact above, it creates a "Stitched Board" effect where vertices are geometrically locked.
+- **Chebyshev Sensitivity**: With the system under-converged due to the artifact above, Chebyshev acceleration may be attempting to "boost" a stalled solution, potentially leading to the "nearly horizontal rebound" seen in the cantilever.
+- **Scale Mismatch (Cusick)**: The Cusick specimen (15cm) on the 9cm pedestal leaves only a 6cm overhang. If the mesh is coarse, and the aforementioned damping artifact is active, the 6cm of fabric doesn't weigh enough to overcome the numerical drag.
+
+---
+
+### 4. Proposed Future Plan
+
+1. **Dynamic Matrix Adaptation**: Investigate moving the bending weight allocation to the RHS or using a **zeroed-matrix path** for procedural flat meshes. PD requires the matrix $A$ to be constant for speed, but $A$ must only contain stiffness for elements that *actually* have a rest state.
+2. **Subspace PD Transition**: Per the ROADMAP, investigate Subspace PD where low-frequency (large-scale drape) is solved on a coarse, low-stiffness proxy, and high-frequency (wrinkles) is added via the stiff fine mesh.
+3. **Chebyshev/Spectral Calibration**: Run a spectral radius analysis to ensure the acceleration coefficient isn't overshooting the true eigenvalues, which would cause the "rebound" artifacts.
+4. **Material-Aware Gravity Scaling**: Instead of scaling down KES stiffness, investigate scaling **up** the gravitational timestep density to make the external forces numerically significant relative to the SPD diagonal entries.

@@ -27,12 +27,16 @@ impl<'a> IpcCollisionHandler for RunnerIpcHandler<'a> {
         self.pipeline.detect_ipc_contacts(px, py, pz, self.d_hat, self.kappa)
     }
 
-    fn compute_ccd_step(&mut self, prev_x: &[f32], prev_y: &[f32], prev_z: &[f32], new_x: &[f32], new_y: &[f32], new_z: &[f32], padding: f32) -> f32 {
-        self.pipeline.compute_ccd_step(&self.mesh.indices, prev_x, prev_y, prev_z, new_x, new_y, new_z, padding)
+    fn compute_ccd_step(&mut self, prev_x: &[f32], prev_y: &[f32], prev_z: &[f32], new_x: &[f32], new_y: &[f32], new_z: &[f32], padding: f32, alphas: &mut [f32]) -> f32 {
+        self.pipeline.compute_ccd_step(&self.mesh.indices, prev_x, prev_y, prev_z, new_x, new_y, new_z, padding, alphas)
     }
 
     fn set_d_hat(&mut self, d_hat: f32) {
         self.d_hat = d_hat;
+    }
+
+    fn project_positions(&mut self, pos_x: &mut [f32], pos_y: &mut [f32], pos_z: &mut [f32]) {
+        self.pipeline.project_positions(pos_x, pos_y, pos_z);
     }
 }
 
@@ -86,8 +90,11 @@ impl BenchmarkRunner {
                     .with_cylinder(0.0, 0.0, 0.3, 0.09);
             },
             ScenarioKind::CantileverBending => {
+                // Box matches the new cantilever strip support surface:
+                // 2.5cm wide (X: -0.015..0.015), 50cm tall (Y: 0..0.499),
+                // 10cm deep (Z: -0.10..0.0). Ledge ends at Z=0.
                 pipeline = pipeline
-                    .with_box(-0.1, 0.1, 0.0, 0.499, -0.2, 0.0);
+                    .with_box(-0.015, 0.015, 0.0, 0.499, -0.10, 0.0);
             },
             _ => {
                 pipeline = pipeline.with_ground(-0.3);
@@ -114,24 +121,46 @@ impl BenchmarkRunner {
             // Tier 2 path: when material is isotropic, use dihedral + co-rotational model
             if properties.is_anisotropic() {
                 let model = Box::new(vistio_material::AnisotropicCoRotationalModel::from_properties(properties));
-                solver.init_with_material_tier3(
-                    &scenario.garment,
-                    &topology,
-                    &scenario.config,
-                    properties,
-                    model,
-                    &scenario.pinned,
-                )?;
+                if scenario.config.ipc_enabled {
+                    solver.init_with_material_tier4(
+                        &scenario.garment,
+                        &topology,
+                        &scenario.config,
+                        properties,
+                        model,
+                        &scenario.pinned,
+                    )?;
+                } else {
+                    solver.init_with_material_tier3(
+                        &scenario.garment,
+                        &topology,
+                        &scenario.config,
+                        properties,
+                        model,
+                        &scenario.pinned,
+                    )?;
+                }
             } else {
                 let model = Box::new(CoRotationalModel::new());
-                solver.init_with_material(
-                    &scenario.garment,
-                    &topology,
-                    &scenario.config,
-                    properties,
-                    model,
-                    &scenario.pinned,
-                )?;
+                if scenario.config.ipc_enabled {
+                    solver.init_with_material_tier4(
+                        &scenario.garment,
+                        &topology,
+                        &scenario.config,
+                        properties,
+                        model,
+                        &scenario.pinned,
+                    )?;
+                } else {
+                    solver.init_with_material(
+                        &scenario.garment,
+                        &topology,
+                        &scenario.config,
+                        properties,
+                        model,
+                        &scenario.pinned,
+                    )?;
+                }
             }
             // Derive mass from material
             let total_area = compute_mesh_area(&scenario.garment);

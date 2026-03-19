@@ -188,7 +188,8 @@ impl BoxCollider {
                 let barrier_grad = crate::barrier::scaled_barrier_gradient(dist_sq, d_hat, kappa);
 
                 let d = dist_sq.sqrt();
-                let factor = barrier_grad * 2.0 * d;
+                let mut factor = barrier_grad * 2.0 * d;
+                factor = factor.clamp(-30.0, 30.0);
 
                 grad_x[i] += factor * dd_dx;
                 grad_y[i] += factor * dd_dy;
@@ -205,7 +206,7 @@ impl BoxCollider {
         &self,
         prev_x: &[f32], prev_y: &[f32], prev_z: &[f32],
         new_x: &[f32], new_y: &[f32], new_z: &[f32],
-        padding: f32,
+        padding: f32, alphas: &mut [f32]
     ) -> f32 {
         let mut min_toi: f32 = 1.0;
 
@@ -217,6 +218,7 @@ impl BoxCollider {
         let max_z_eff = self.max_z + padding;
 
         for i in 0..prev_x.len() {
+            alphas[i] = 1.0;
             let px0 = prev_x[i];
             let py0 = prev_y[i];
             let pz0 = prev_z[i];
@@ -238,6 +240,7 @@ impl BoxCollider {
                 let dot_pv = (px0 - cx) * vx + (py0 - cy) * vy + (pz0 - cz) * vz;
                 if dot_pv < 0.0 {
                     min_toi = 0.0;
+                    alphas[i] = 0.0;
                 }
                 continue;
             }
@@ -266,8 +269,11 @@ impl BoxCollider {
 
                 && (0.0..=1.0).contains(&t_min) {
                     // It entered the box during this frame!
-                    min_toi = min_toi.min(t_min * 0.9);
+                    let safe_t = t_min * 0.9;
+                    min_toi = min_toi.min(safe_t);
+                    alphas[i] = alphas[i].min(safe_t);
                 }
+            alphas[i] = alphas[i].max(1e-6);
         }
 
         min_toi.max(1e-6)

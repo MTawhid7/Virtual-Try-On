@@ -115,11 +115,12 @@ impl GroundPlane {
         &self,
         prev_y: &[f32],
         new_y: &[f32],
-        padding: f32,
+        padding: f32, alphas: &mut [f32]
     ) -> f32 {
         let mut min_toi: f32 = 1.0;
 
         for i in 0..prev_y.len() {
+            alphas[i] = 1.0;
             let py0 = prev_y[i];
             let py1 = new_y[i];
 
@@ -129,6 +130,7 @@ impl GroundPlane {
                 // Already inside padded zone. If moving closer to ground, stop.
                 if py1 < py0 {
                     min_toi = 0.0;
+                    alphas[i] = 0.0;
                 }
                 continue;
             }
@@ -138,9 +140,12 @@ impl GroundPlane {
                 let t = (eff_height - py0) / vy;
 
                 if (0.0..=1.0).contains(&t) {
-                    min_toi = min_toi.min(t * 0.9);
+                    let safe_t = t * 0.9;
+                    min_toi = min_toi.min(safe_t);
+                    alphas[i] = alphas[i].min(safe_t);
                 }
             }
+            alphas[i] = alphas[i].max(1e-6);
         }
 
         min_toi.max(1e-6)

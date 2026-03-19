@@ -28,7 +28,8 @@ impl Scenario {
             // CCD line search prevents barrier overshoot during free-fall.
             barrier_d_hat: 1e-4,
             barrier_kappa: 0.0, // adaptive estimation
-            al_max_iterations: 15,
+            al_mu_initial: 10.0,
+            al_max_iterations: 25,
             ..Default::default()
         };
 
@@ -51,19 +52,20 @@ impl Scenario {
     /// drops onto a 9cm-radius cylinder pedestal.
     pub fn cusick_drape() -> Self {
         // Higher resolution for realistic fold formation around cylinder edge.
-        // 48×15 gives enough elements to buckle and form radial pleats.
-        let mut garment = vistio_mesh::generators::circular_grid(0.15, 48, 15);
+        // 64×20 gives enough elements to buckle and form radial pleats.
+        let mut garment = vistio_mesh::generators::circular_grid(0.15, 64, 20);
         let n = garment.vertex_count();
         for i in 0..n {
             garment.pos_z[i] = garment.pos_y[i];
-            garment.pos_y[i] = 0.5;
+            garment.pos_y[i] = 0.35;
         }
         let config = SolverConfig {
             ipc_enabled: true,
             // Larger barrier zone for cylinder contact stability
             barrier_d_hat: 1e-4,
             barrier_kappa: 0.0,
-            al_max_iterations: 15,
+            al_mu_initial: 10.0,
+            al_max_iterations: 25,
             ..Default::default()
         };
 

@@ -166,7 +166,11 @@ impl BendingData {
         topology: &Topology,
         properties: &vistio_material::FabricProperties,
     ) -> Self {
-        let stiffness = properties.avg_bending_stiffness() * 1e-4; // Temporary physical scaling test
+        // Physically grounded KES-to-PD unit conversion.
+        // BENDING_BASE = 0.1 targets low bending rigidity (~10^-5 Nm),
+        // allowing natural drapes and visible sagging in cantilever tests.
+        // Reduced to 0.001 to prevent PD drag from artificially locking the mesh.
+        let stiffness = properties.avg_bending_stiffness() * 0.001;
         Self::from_topology(mesh, topology, stiffness)
     }
 
@@ -200,6 +204,10 @@ impl BendingData {
         let p_wa = Vec3::new(pos_x[elem.wing_a], pos_y[elem.wing_a], pos_z[elem.wing_a]);
         let p_wb = Vec3::new(pos_x[elem.wing_b], pos_y[elem.wing_b], pos_z[elem.wing_b]);
 
+        // The projection will naturally rotate vertices toward the rest state.
+        // For flat rest states (θ₀ ≈ π), it will correctly project to a
+        // coplanar configuration. Do NOT hack this by returning q_current,
+        // as that introduces massive artificial drag in the PD solver.
         let current_angle = compute_dihedral_angle(p_v0, p_v1, p_wa, p_wb);
         let angle_diff = current_angle - elem.rest_angle;
 

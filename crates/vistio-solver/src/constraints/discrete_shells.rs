@@ -207,7 +207,7 @@ impl DiscreteShellsBendingData {
         topology: &Topology,
         properties: &vistio_material::FabricProperties,
     ) -> Self {
-        let stiffness = properties.avg_bending_stiffness() * 1e-4; // Temporary physical scaling test
+        let stiffness = properties.avg_bending_stiffness() * 0.001;
         Self::from_topology(mesh, topology, stiffness)
     }
 
@@ -226,9 +226,9 @@ impl DiscreteShellsBendingData {
         properties: &vistio_material::FabricProperties,
     ) -> Self {
         // Use the average bending stiffness as the base, then modulate per-edge.
-        let k_avg = properties.avg_bending_stiffness() * 1e-4;
-        let k_warp = properties.bending_stiffness_warp * 1e-4;
-        let k_weft = properties.bending_stiffness_weft * 1e-4;
+        let k_avg = properties.avg_bending_stiffness() * 0.001;
+        let k_warp = properties.bending_stiffness_warp * 0.001;
+        let k_weft = properties.bending_stiffness_weft * 0.001;
         let avg_raw = (k_warp + k_weft) / 2.0;
 
         let mut data = Self::from_topology(mesh, topology, k_avg);
@@ -298,6 +298,7 @@ impl DiscreteShellsBendingData {
         let p_wa = Vec3::new(pos_x[elem.wing_a], pos_y[elem.wing_a], pos_z[elem.wing_a]);
         let p_wb = Vec3::new(pos_x[elem.wing_b], pos_y[elem.wing_b], pos_z[elem.wing_b]);
 
+        // Let projection naturally compute a coplanar state for flat rest angles.
         let current_angle = compute_dihedral_angle(p_v0, p_v1, p_wa, p_wb);
         let angle_diff = current_angle - elem.rest_angle;
 

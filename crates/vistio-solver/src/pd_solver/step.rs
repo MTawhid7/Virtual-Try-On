@@ -24,15 +24,15 @@ impl SolverStrategy for ProjectiveDynamicsSolver {
         self.n = mesh.vertex_count();
         self.config = config.clone();
 
-        // Build FEM elements with stiffness from config
-        let elements = crate::element::ElementData::from_mesh(mesh, config.stretch_weight * 1000.0);
+        // Build FEM elements with stiffness from config (normalized to physical range)
+        let elements = crate::element::ElementData::from_mesh(mesh, config.stretch_weight * 500.0);
 
         // Default density 200 g/m² for the base config
         let density = 200.0;
         self.mass = super::mass::compute_lumped_masses(self.n, &elements, density, pinned);
 
-        // Build bending elements from topology (legacy dihedral)
-        let bending = crate::bending::BendingData::from_topology(mesh, topology, config.bending_weight * 100.0);
+        // Build bending elements from topology (normalized to physical range)
+        let bending = crate::bending::BendingData::from_topology(mesh, topology, config.bending_weight * 1.0);
         self.bending = Some(bending);
         self.ds_bending = None;
 

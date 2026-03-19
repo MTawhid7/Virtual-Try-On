@@ -84,125 +84,77 @@ impl ProjectiveDynamicsSolver {
                 return Ok(StepResult { iterations: total_iterations_sum, converged: false, final_residual: 0.0, wall_time: 0.0 });
             }
 
-            // 3. Initialize positions from previous safe state
-            // DO NOT copy from pred, because pred might be penetrating colliders!
-            // PD Iterative solver will pull pos towards pred safely using CCD.
-            // state.pos_x/y/z are already set to prev at the start of the timestep.
-            // (Actually, wait, the `state.save_previous()` leaves `state.pos` at `prev`! So we do nothing.)
+            let ccd_init_padding = d_hat_eff.sqrt() * 0.5;
+            let mut ccd_alphas = vec![1.0; n];
+            handler.compute_ccd_step(
+                &state.prev_x, &state.prev_y, &state.prev_z,
+                &state.pred_x, &state.pred_y, &state.pred_z,
+                ccd_init_padding,
+                &mut ccd_alphas,
+            );
+
+            for i in 0..n {
+                if state.inv_mass[i] > 0.0 {
+                    let safe_alpha = if ccd_alphas[i] < 1.0 { ccd_alphas[i] * 0.9 } else { 1.0 };
+                    
+                    // CRITICAL: We must limit the inertia target (pred) as well!
+                    // If we only limit pos_x (the initial guess), the PD solver's 
+                    // inertia term will still aggressively pull the vertex through
+                    // the collider during the linear solve. By scaling pred_x, we 
+                    // ensure the inertia target sits exactly on the collision surface.
+                    state.pred_x[i] = state.prev_x[i] + safe_alpha * (state.pred_x[i] - state.prev_x[i]);
+                    state.pred_y[i] = state.prev_y[i] + safe_alpha * (state.pred_y[i] - state.prev_y[i]);
+                    state.pred_z[i] = state.prev_z[i] + safe_alpha * (state.pred_z[i] - state.prev_z[i]);
+                    
+                    state.pos_x[i] = state.pred_x[i];
+                    state.pos_y[i] = state.pred_y[i];
+                    state.pos_z[i] = state.pred_z[i];
+                } else {
+                    state.pos_x[i] = state.prev_x[i];
+                    state.pos_y[i] = state.prev_y[i];
+                    state.pos_z[i] = state.prev_z[i];
+                }
+            }
 
             // Warm-start: only clear AL multipliers for vertices NOT in contact.
             // Vertices still in contact keep their multipliers for faster convergence.
             // On the first substep we clear everything since contact state is stale.
-            if _substep == 0 {
-                state.al_lambda_x.fill(0.0);
-                state.al_lambda_y.fill(0.0);
-                state.al_lambda_z.fill(0.0);
-            }
-
             let mut sol_x = vec![0.0_f32; n];
             let mut sol_y = vec![0.0_f32; n];
             let mut sol_z = vec![0.0_f32; n];
 
             handler.set_d_hat(d_hat_eff);
 
-            let mut mu = self.config.al_mu_initial;
             let mut total_iterations = 0_u32;
             let mut final_residual = f64::MAX;
-            let mut al_converged = false;
 
-            let mut updated_forces = IpcBarrierForces::empty(n);
+            // Single solve pass instead of AL outer loop
+            let (iters, residual) = self.run_pd_inner_loop(
+                state, elements, n, sub_dt,
+                &mut sol_x, &mut sol_y, &mut sol_z,
+                handler,
+            )?;
+            total_iterations += iters;
+            final_residual = residual;
+
+            // Detect contacts after PD to get normals for velocity filter
+            let updated_forces = handler.detect_contacts(
+                &state.pos_x, &state.pos_y, &state.pos_z,
+            );
+
             let mut ever_in_contact = vec![false; n];
             let mut final_contact_nx = vec![0.0_f32; n];
             let mut final_contact_ny = vec![0.0_f32; n];
             let mut final_contact_nz = vec![0.0_f32; n];
 
-            // OUTER LOOP: Augmented Lagrangian
-            let mut previous_violation = f32::MAX;
-            for _al_iter in 0..self.config.al_max_iterations {
-
-                // Detect contacts at current positions
-                let barrier_forces = handler.detect_contacts(
-                    &state.pos_x, &state.pos_y, &state.pos_z,
-                );
-
-                if barrier_forces.grad_y.iter().any(|&v| !v.is_finite()) {
-                    #[cfg(debug_assertions)]
-                    eprintln!("TRAP: NaN/Inf in barrier_forces.grad_y detected!");
-                    return Ok(StepResult { iterations: total_iterations, converged: false, final_residual: 0.0, wall_time: 0.0 });
+            for i in 0..n {
+                if updated_forces.in_contact[i] {
+                    ever_in_contact[i] = true;
+                    final_contact_nx[i] = updated_forces.contact_nx[i];
+                    final_contact_ny[i] = updated_forces.contact_ny[i];
+                    final_contact_nz[i] = updated_forces.contact_nz[i];
                 }
-
-                // Track contact state
-                for i in 0..n {
-                    if barrier_forces.in_contact[i] {
-                        ever_in_contact[i] = true;
-                        final_contact_nx[i] = barrier_forces.contact_nx[i];
-                        final_contact_ny[i] = barrier_forces.contact_ny[i];
-                        final_contact_nz[i] = barrier_forces.contact_nz[i];
-                    }
-                }
-
-                // Clear lambda for vertices that left the contact zone
-                for i in 0..n {
-                    if !barrier_forces.in_contact[i] {
-                        state.al_lambda_x[i] = 0.0;
-                        state.al_lambda_y[i] = 0.0;
-                        state.al_lambda_z[i] = 0.0;
-                    }
-                }
-
-                let (iters, residual) = self.run_pd_inner_loop(
-                    state, elements, n, sub_dt,
-                    &barrier_forces, mu,
-                    &mut sol_x, &mut sol_y, &mut sol_z,
-                    handler, _al_iter, d_hat_eff,
-                )?;
-                total_iterations += iters;
-                final_residual = residual;
-
-                // Re-detect contacts after PD converged
-                updated_forces = handler.detect_contacts(
-                    &state.pos_x, &state.pos_y, &state.pos_z,
-                );
-
-                for i in 0..n {
-                    if updated_forces.in_contact[i] {
-                        ever_in_contact[i] = true;
-                        final_contact_nx[i] = updated_forces.contact_nx[i];
-                        final_contact_ny[i] = updated_forces.contact_ny[i];
-                        final_contact_nz[i] = updated_forces.contact_nz[i];
-                    }
-                }
-
-                // Check AL convergence
-                if updated_forces.max_violation < self.config.al_tolerance {
-                    al_converged = true;
-                    break;
-                }
-
-                // Break if plateaued
-                if (previous_violation - updated_forces.max_violation).abs() < 1e-6
-                    && updated_forces.max_violation < d_hat_eff {
-                    break;
-                }
-                previous_violation = updated_forces.max_violation;
-
-                // Update AL multipliers
-                for i in 0..n {
-                    if updated_forces.in_contact[i] {
-                        state.al_lambda_x[i] += mu * updated_forces.grad_x[i];
-                        state.al_lambda_y[i] += mu * updated_forces.grad_y[i];
-                        state.al_lambda_z[i] += mu * updated_forces.grad_z[i];
-                    }
-                }
-
-                mu *= self.config.al_mu_growth;
-                if mu > 1e6 { mu = 1e6; }
-
-                #[cfg(debug_assertions)]
-                if _al_iter == self.config.al_max_iterations - 1 {
-                    eprintln!("  [AL Outer] reached max iters ({}), violation={:.6}", _al_iter + 1, updated_forces.max_violation);
-                }
-            } // outer loop
+            }
 
             // Velocity update for this substep
             state.update_velocities(sub_dt);
@@ -227,7 +179,7 @@ impl ProjectiveDynamicsSolver {
 
             total_iterations_sum += total_iterations;
             final_residual_last = final_residual;
-            if !al_converged && final_residual >= self.config.tolerance {
+            if final_residual >= self.config.tolerance {
                 converged_all = false;
             }
         } // substep loop
@@ -242,7 +194,7 @@ impl ProjectiveDynamicsSolver {
         })
     }
 
-    /// Run the PD inner local-global loop for a single AL iteration.
+    /// Run the PD inner local-global loop for a single substep.
     ///
     /// Returns (iterations_run, final_residual).
     #[allow(clippy::too_many_arguments)]
@@ -252,14 +204,10 @@ impl ProjectiveDynamicsSolver {
         elements: &crate::element::ElementData,
         n: usize,
         sub_dt: f32,
-        barrier_forces: &IpcBarrierForces,
-        mu: f32,
         sol_x: &mut [f32],
         sol_y: &mut [f32],
         sol_z: &mut [f32],
         handler: &mut H,
-        _al_iter: u32,
-        d_hat_eff: f32,
     ) -> VistioResult<(u32, f64)>
     {
         let mut total_iterations = 0_u32;
@@ -288,7 +236,7 @@ impl ProjectiveDynamicsSolver {
 
             if proj_y.iter().any(|&(y0, y1, y2)| !y0.is_finite() || !y1.is_finite() || !y2.is_finite()) {
                 #[cfg(debug_assertions)]
-                eprintln!("TRAP: NaN/Inf in membrane projection targets! (iter {}, al_iter {})", _iter, _al_iter);
+                eprintln!("TRAP: NaN/Inf in membrane projection targets! (iter {})", _iter);
                 return Ok((total_iterations, 0.0));
             }
 
@@ -299,7 +247,7 @@ impl ProjectiveDynamicsSolver {
             if let Some(ref bt_y) = bend_targets_y {
                 if bt_y.iter().any(|&(y0, y1, y2, y3)| !y0.is_finite() || !y1.is_finite() || !y2.is_finite() || !y3.is_finite()) {
                     #[cfg(debug_assertions)]
-                    eprintln!("TRAP: NaN/Inf in bending projection targets! (iter {}, al_iter {})", _iter, _al_iter);
+                    eprintln!("TRAP: NaN/Inf in bending projection targets! (iter {})", _iter);
                     return Ok((total_iterations, 0.0));
                 }
             }
@@ -321,18 +269,15 @@ impl ProjectiveDynamicsSolver {
 
             if rhs_y.iter().any(|&v| !v.is_finite()) {
                 #[cfg(debug_assertions)]
-                eprintln!("TRAP: NaN/Inf in rhs_y BEFORE barrier RHS! (iter {}, al_iter {})", _iter, _al_iter);
+                eprintln!("TRAP: NaN/Inf in rhs_y BEFORE barrier RHS! (iter {})", _iter);
                 return Ok((total_iterations, 0.0));
             }
 
-            // Add barrier forces to RHS
-            assemble_barrier_rhs(&mut rhs_x, &barrier_forces.grad_x, &state.al_lambda_x, mu);
-            assemble_barrier_rhs(&mut rhs_y, &barrier_forces.grad_y, &state.al_lambda_y, mu);
-            assemble_barrier_rhs(&mut rhs_z, &barrier_forces.grad_z, &state.al_lambda_z, mu);
+            // (Barrier forces removed. Contact is resolved via position projection after the solve)
 
             if rhs_y.iter().any(|&v| v.is_nan()) {
                 #[cfg(debug_assertions)]
-                eprintln!("TRAP: NaN in rhs_y after barrier RHS! (iter {}, al_iter {})", _iter, _al_iter);
+                eprintln!("TRAP: NaN in rhs_y after barrier RHS! (iter {})", _iter);
                 return Ok((total_iterations, 0.0));
             }
 
@@ -364,74 +309,25 @@ impl ProjectiveDynamicsSolver {
 
             if sol_y.iter().any(|&v| !v.is_finite()) {
                 #[cfg(debug_assertions)]
-                eprintln!("TRAP: NaN/Inf in linear solver output! (iter {}, al_iter {})", _iter, _al_iter);
+                eprintln!("TRAP: NaN/Inf in linear solver output! (iter {})", _iter);
                 return Ok((total_iterations, 0.0));
             }
 
-            // CCD line search
-            // Padding forces CCD to stop vertices at the halfway point of the barrier zone (rather than the exact object skin).
-            let ccd_padding = d_hat_eff.sqrt() * 0.5;
-            let mut max_alpha = handler.compute_ccd_step(
-                &state.pos_x, &state.pos_y, &state.pos_z,
-                sol_x, sol_y, sol_z,
-                ccd_padding,
-            );
-            if max_alpha < 1.0 {
-                max_alpha *= 0.8;
-            }
-            max_alpha = max_alpha.min(1.0);
-
-            // Armijo backtracking
-            let armijo_c = 1e-4_f32;
-            let mut alpha = max_alpha;
-            for _bt in 0..4 {
-                if alpha < 0.1 { break; }
-                let mut grad_dot_d = 0.0_f64;
-                for i in 0..n {
-                    if state.inv_mass[i] > 0.0 {
-                        let dx = sol_x[i] - state.pos_x[i];
-                        let dy = sol_y[i] - state.pos_y[i];
-                        let dz = sol_z[i] - state.pos_z[i];
-                        grad_dot_d += (barrier_forces.grad_x[i] * dx
-                            + barrier_forces.grad_y[i] * dy
-                            + barrier_forces.grad_z[i] * dz) as f64;
-                    }
-                }
-                if grad_dot_d * (mu as f64) > (armijo_c as f64) * diff_sq * 100.0 {
-                    alpha *= 0.5;
-                } else {
-                    break;
-                }
-            }
-
-            // Apply position update with displacement capping
+            // Apply unconstrained PD solver positions
             for i in 0..n {
                 if state.inv_mass[i] > 0.0 {
-                    let mut dx = alpha * (sol_x[i] - state.pos_x[i]);
-                    let mut dy = alpha * (sol_y[i] - state.pos_y[i]);
-                    let mut dz = alpha * (sol_z[i] - state.pos_z[i]);
-
-                // Cap maximum displacement to prevent infinity explosions
-                let disp_len_sq = dx*dx + dy*dy + dz*dz;
-                if disp_len_sq > 100.0 {
-                    #[cfg(debug_assertions)]
-                    eprintln!("TRAP: Massive displacement! dx={}, dy={}, dz={}, sol_y={}, prev_y={}, b_y_val={}, diag={}, m={}, H={}",
-                        dx, dy, dz, sol_y[i], state.pos_y[i], barrier_forces.grad_y[i],
-                        (state.mass[i] / (sub_dt * sub_dt)) + mu * barrier_forces.hessian_diag[i],
-                        state.mass[i], barrier_forces.hessian_diag[i]
-                    );
-
-                    let scale = 1.0 / disp_len_sq.sqrt();
-                    dx *= scale;
-                    dy *= scale;
-                    dz *= scale;
-                }
-
-                    state.pos_x[i] += dx;
-                    state.pos_y[i] += dy;
-                    state.pos_z[i] += dz;
+                    state.pos_x[i] = sol_x[i];
+                    state.pos_y[i] = sol_y[i];
+                    state.pos_z[i] = sol_z[i];
                 }
             }
+
+            // Position-Based Collision Projection:
+            // Instead of using unstable penalty forces on the RHS, we let the PD
+            // solver handle the internal elastic structure (membrane, bending),
+            // and then directly project any penetrating vertices back to the
+            // exact surface of the colliders. This is unconditionally stable.
+            handler.project_positions(&mut state.pos_x, &mut state.pos_y, &mut state.pos_z);
 
             total_iterations += 1;
 

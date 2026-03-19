@@ -113,17 +113,21 @@ impl ConstitutiveModel for AnisotropicCoRotationalModel {
         // - Tensile (σ > 1.0): target = 1.0 + (σ - 1.0) * (1 - k)
         //   With k=1 (full stiffness): target = 1.0 (fully restore)
         //   With k=0 (no stiffness): target = σ (no restoration)
-        // - Compressive (σ ≤ 1.0): target = σ (zero force, tension-field)
+        // - Compressive (σ ≤ 1.0): completely disable tension-field logic 
+        //   (use 1.0 pure ARAP) because returning s_current in a constant-matrix
+        //   PD solver equates to massive viscous drag.
+        const COMPRESSION_BLEND: f32 = 1.0;
+
         let s0_target = if s0 > 1.0 {
             1.0 + (s0 - 1.0) * (1.0 - k0)
         } else {
-            s0 // Tension-field: no compressive stress
+            s0 + COMPRESSION_BLEND * (1.0 - s0)
         };
 
         let s1_target = if s1 > 1.0 {
             1.0 + (s1 - 1.0) * (1.0 - k1)
         } else {
-            s1 // Tension-field: no compressive stress
+            s1 + COMPRESSION_BLEND * (1.0 - s1)
         };
 
         // Reconstruct target stretch: S_target = V · diag(s0_t, s1_t) · Vᵀ

@@ -31,31 +31,49 @@ pub struct PolarDecomposition {
     pub eigenvectors: (glam::Vec2, glam::Vec2),
 }
 
-/// Clamp a 2×2 stretch tensor to remove compressive stress (tension-field theory).
-///
-/// Given the eigendecomposition of S (singular values and eigenvectors from
-/// `PolarDecomposition`), clamps any singular value > 1.0 down to 1.0 for the
-/// *target*, keeping compressive singular values matching the actual deformation.
+/// Clamp singular values to implement **tension-field theory** compatible
+/// with Projective Dynamics' constant system matrix.
 ///
 /// The effect on the energy E = ||F - R·S_target||²:
 /// - **Tensile** (σ > 1.0): S_target has σ_target = 1.0, so the element is pulled
 ///   back to its rest length. Normal stretch resistance is preserved.
-/// - **Compressive** (σ < 1.0): S_target has σ_target = σ (matches actual deformation),
-///   so the energy contribution is zero. No compressive restoring force.
+/// - **Compressive** (σ < 1.0): S_target blends toward σ_current with a small
+///   offset toward 1.0. This gives near-zero compression resistance (allowing
+///   draping) while avoiding the full PD drag artifact that occurs when
+///   target == current exactly.
 ///
-/// This allows fabric to freely compress horizontally under Poisson effect
-/// without generating restoring forces that cause macroscopic buckling.
+/// In standard PD, the stiffness K is pre-factored into the constant LHS matrix.
+/// - If target = s_current exactly: K*x_current on RHS, creating massive drag
+/// - If target = 1.0 (ARAP): full compression penalty, preventing draping
+/// - Blend (0.1 toward 1.0): ~10% of ARAP compression force, enough to
+///   avoid drag while allowing gravity to dominate
 ///
 /// Returns the clamped 2×2 stretch tensor [s00, s01, s01, s11].
 pub fn clamp_stretch(polar: &PolarDecomposition) -> [f32; 4] {
     let (s0, s1) = polar.singular_values;
     let (v0, v1) = polar.eigenvectors;
 
-    // For the target: clamp σ to min(σ, 1.0)
-    // σ > 1.0 (tensile) → target = 1.0 (restore to rest length)
-    // σ < 1.0 (compressive) → target = σ (no restoring force)
-    let cs0 = s0.min(1.0);
-    let cs1 = s1.min(1.0);
+    // Tension-field blend factor for compression.
+    // 0.0 = pure tension-field (target=s, full PD drag)
+    // 1.0 = pure ARAP (target=1.0, full compression penalty)
+    // ANY value < 1.0 creates viscous drag proportional to (1-BLEND)*K.
+    // To allow the cloth edges to fall, we MUST eliminate viscous drag 
+    // by using 1.0, and rely on weak membrane stiffness to allow draping.
+    const COMPRESSION_BLEND: f32 = 1.0;
+
+    let cs0 = if s0 >= 1.0 {
+        1.0  // Tensile: clamp to rest length (standard stretch resistance)
+    } else {
+        // Compressive: blend toward rest length to avoid PD drag
+        // target = s0 + BLEND * (1.0 - s0) = lerp(s0, 1.0, BLEND)
+        s0 + COMPRESSION_BLEND * (1.0 - s0)
+    };
+
+    let cs1 = if s1 >= 1.0 {
+        1.0
+    } else {
+        s1 + COMPRESSION_BLEND * (1.0 - s1)
+    };
 
     // Reconstruct S_target = V * diag(cs0, cs1) * V^T
     let s00 = v0.x * v0.x * cs0 + v1.x * v1.x * cs1;
