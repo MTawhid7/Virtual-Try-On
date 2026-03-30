@@ -1,0 +1,12 @@
+[package]
+name = "vistio-material"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+description = "Constitutive model abstractions and material database for Vistio."
+
+[dependencies]
+vistio-types = { path = "../vistio-types" }
+vistio-math = { path = "../vistio-math" }
+serde = { workspace = true }

@@ -1,0 +1,81 @@
+>>> INITIALIZING CUSICK DRAPE DEBUGGER <<<
+Cylinder bounds: top=0.3, radius=0.09
+Simulation starting. Tracking a center vertex...
+  detect_contacts: max_viol=0.000000, act=502280, grad_y bounds [-1.426564, 1.324259]
+  compute_ccd_step: min_toi=0.00000100
+  SelfCol max_viol: 0.001
+  detect_contacts: max_viol=0.001000, act=15389, grad_y bounds [-185683344.000000, 155909536.000000]
+  compute_ccd_step: min_toi=0.00000100
+  Ground max_viol: 3397.0068
+  detect_contacts: max_viol=3397.006836, act=589, grad_y bounds [-2000060.750000, 145.331345]
+  compute_ccd_step: min_toi=0.00000100
+  detect_contacts: max_viol=0.000000, act=212, grad_y bounds [-42.274155, 63.184986]
+  compute_ccd_step: min_toi=0.00000100
+  detect_contacts: max_viol=0.000000, act=199, grad_y bounds [-1021.890747, 1397.977295]
+  compute_ccd_step: min_toi=0.00000100
+  detect_contacts: max_viol=0.000000, act=183, grad_y bounds [-4592.930176, 3014.534424]
+  compute_ccd_step: min_toi=0.00000100
+  detect_contacts: max_viol=0.000000, act=168, grad_y bounds [-41.285496, 34.140701]
+  compute_ccd_step: min_toi=0.00000626
+  detect_contacts: max_viol=0.000000, act=167, grad_y bounds [-14.395430, 16.053558]
+  compute_ccd_step: min_toi=0.00000341
+  detect_contacts: max_viol=0.000000, act=150, grad_y bounds [-1.962955, 1.744965]
+  compute_ccd_step: min_toi=0.00002618
+  detect_contacts: max_viol=0.000000, act=110, grad_y bounds [-2.540951, 2.878874]
+  compute_ccd_step: min_toi=0.00000100
+  detect_contacts: max_viol=0.000000, act=92, grad_y bounds [-1.674398, 2.437409]
+  compute_ccd_step: min_toi=0.00004224
+  detect_contacts: max_viol=0.000000, act=114, grad_y bounds [-78.376732, 68.601486]
+  compute_ccd_step: min_toi=0.00000100
+  detect_contacts: max_viol=0.000000, act=84, grad_y bounds [-5.353293, 4.949128]
+  compute_ccd_step: min_toi=0.00003583
+  detect_contacts: max_viol=0.000000, act=68, grad_y bounds [-184.227844, 209.270691]
+  compute_ccd_step: min_toi=0.00000287
+  detect_contacts: max_viol=0.000000, act=65, grad_y bounds [-7.520896, 6.750682]
+  compute_ccd_step: min_toi=0.00002018
+  detect_contacts: max_viol=0.000000, act=58, grad_y bounds [-17.925169, 15.766137]
+  detect_contacts: max_viol=0.000000, act=58, grad_y bounds [-17.925169, 15.766137]
+
+[Step 1]
+Center Vertex Y: 0.4000 -> 1030.0571
+Center Vertex R from origin: 50.4202
+Solver CCD TOI taken: 0.000001
+Solver Max Violation: 3397.006836
+  detect_contacts: max_viol=0.000000, act=9, grad_y bounds [-5.176972, 4.555687]
+  compute_ccd_step: min_toi=0.00002769
+  detect_contacts: max_viol=0.000000, act=1, grad_y bounds [-0.000001, 0.000001]
+  compute_ccd_step: min_toi=0.00484326
+  detect_contacts: max_viol=0.000000, act=2, grad_y bounds [-0.099767, 0.052738]
+  compute_ccd_step: min_toi=0.00127126
+  detect_contacts: max_viol=0.000000, act=0, grad_y bounds [0.000000, 0.000000]
+  compute_ccd_step: min_toi=0.00038264
+  detect_contacts: max_viol=0.000000, act=0, grad_y bounds [0.000000, 0.000000]
+  compute_ccd_step: min_toi=0.00010681
+  detect_contacts: max_viol=0.000000, act=0, grad_y bounds [0.000000, 0.000000]
+  compute_ccd_step: min_toi=0.00003031
+  detect_contacts: max_viol=0.000000, act=0, grad_y bounds [0.000000, 0.000000]
+  compute_ccd_step: min_toi=0.00000853
+  detect_contacts: max_viol=0.000000, act=0, grad_y bounds [0.000000, 0.000000]
+  compute_ccd_step: min_toi=0.00000252
+  detect_contacts: max_viol=0.000000, act=0, grad_y bounds [0.000000, 0.000000]
+  compute_ccd_step: min_toi=0.00000100
+  detect_contacts: max_viol=0.000000, act=0, grad_y bounds [0.000000, 0.000000]
+  compute_ccd_step: min_toi=0.00000100
+  detect_contacts: max_viol=0.000000, act=0, grad_y bounds [0.000000, 0.000000]
+  compute_ccd_step: min_toi=0.00227602
+  detect_contacts: max_viol=0.000000, act=0, grad_y bounds [0.000000, 0.000000]
+  compute_ccd_step: min_toi=0.00063772
+  detect_contacts: max_viol=0.000000, act=0, grad_y bounds [0.000000, 0.000000]
+  compute_ccd_step: min_toi=0.00017853
+  detect_contacts: max_viol=0.000000, act=0, grad_y bounds [0.000000, 0.000000]
+  compute_ccd_step: min_toi=0.00005279
+  detect_contacts: max_viol=0.000000, act=0, grad_y bounds [0.000000, 0.000000]
+  compute_ccd_step: min_toi=0.00001373
+  detect_contacts: max_viol=0.000000, act=0, grad_y bounds [0.000000, 0.000000]
+  detect_contacts: max_viol=0.000000, act=0, grad_y bounds [0.000000, 0.000000]
+
+[Step 2]
+Center Vertex Y: 1030.0571 -> 2050.8921
+Center Vertex R from origin: 98.0078
+Solver CCD TOI taken: 0.000001
+Solver Max Violation: 0.000000

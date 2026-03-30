@@ -1,0 +1,14 @@
+[package]
+name = "vistio-types"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+description = "Shared types, IDs, error types, and constants for the Vistio physics engine."
+
+[dependencies]
+thiserror = { workspace = true }
+serde = { workspace = true }
+
+[dev-dependencies]
+serde_json = { workspace = true }

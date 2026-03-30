@@ -1,0 +1,11 @@
+[package]
+name = "vistio-gpu"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+description = "GPU compute abstraction layer (wgpu backend, CPU fallback) for Vistio."
+
+[dependencies]
+vistio-types = { path = "../vistio-types" }
+vistio-math = { path = "../vistio-math" }

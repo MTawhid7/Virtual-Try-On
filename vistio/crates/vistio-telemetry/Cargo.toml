@@ -1,0 +1,13 @@
+[package]
+name = "vistio-telemetry"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+description = "Event bus, metrics collection, and pluggable telemetry sinks for Vistio."
+
+[dependencies]
+vistio-types = { path = "../vistio-types" }
+serde = { workspace = true }
+serde_json = { workspace = true }
+tracing = { workspace = true }

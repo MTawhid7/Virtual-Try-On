@@ -1,0 +1,18 @@
+[package]
+name = "vistio-solver"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+description = "Time integration and solver strategies (Projective Dynamics, implicit) for Vistio."
+
+[dependencies]
+vistio-types = { path = "../vistio-types" }
+vistio-math = { path = "../vistio-math" }
+vistio-mesh = { path = "../vistio-mesh" }
+vistio-material = { path = "../vistio-material" }
+serde = { workspace = true }
+toml = { workspace = true }
+
+[dev-dependencies]
+toml = { workspace = true }

@@ -1,0 +1,42 @@
+# ─── Rust / Cargo ──────────────────────────────────────────────
+/target/
+**/*.rs.bk
+Cargo.lock
+
+# ─── Build artifacts ───────────────────────────────────────────
+*.o
+*.a
+*.so
+*.dylib
+*.dll
+*.exe
+
+# ─── IDE / Editor ──────────────────────────────────────────────
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+Thumbs.db
+
+# ─── Benchmark outputs ────────────────────────────────────────
+*.csv
+results/
+
+# ─── Debug snapshots & Logs ───────────────────────────────────
+*.bin
+*.log
+snapshots/
+debug/
+
+# ─── Agent / AI metadata ──────────────────────────────────────
+.agents/
+.agent/
+_agents/
+_agent/
+.gemini/
+
+# ─── Environment ──────────────────────────────────────────────
+.env
+.env.local

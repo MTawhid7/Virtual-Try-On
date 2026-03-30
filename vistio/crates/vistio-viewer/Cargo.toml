@@ -1,0 +1,16 @@
+[package]
+name = "vistio-viewer"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+vistio-types = { path = "../vistio-types" }
+vistio-mesh = { path = "../vistio-mesh" }
+vistio-material = { path = "../vistio-material" }
+vistio-solver = { path = "../vistio-solver" }
+vistio-bench = { path = "../vistio-bench" }
+
+bevy = "0.14"
+bevy_panorbit_camera = "0.19.0"
+vistio-contact = { version = "0.1.0", path = "../vistio-contact" }
+vistio-math = { version = "0.1.0", path = "../vistio-math" }

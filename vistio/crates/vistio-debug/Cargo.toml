@@ -1,0 +1,13 @@
+[package]
+name = "vistio-debug"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+description = "Debug hooks, state snapshots, and visualization sinks for Vistio."
+
+[dependencies]
+vistio-types = { path = "../vistio-types" }
+vistio-telemetry = { path = "../vistio-telemetry" }
+serde = { workspace = true }
+bincode = { workspace = true }
