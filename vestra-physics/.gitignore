@@ -1,0 +1,36 @@
+# --- Node / JS ---
+node_modules
+dist
+dist-ssr
+*.local
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+lerna-debug.log*
+
+# --- Rust / Cargo ---
+# The heavy build artifacts
+target/
+**/*.rs.bk
+
+# --- WASM / Build Artifacts ---
+# Ignore the generated WASM package in the source tree
+# (We rebuild this on the fly)
+src/physics-pkg/
+
+# --- Editor / OS ---
+.vscode/*
+!.vscode/extensions.json
+.idea
+.DS_Store
+Thumbs.db
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
+
+# --- Vite / Environment ---
+.env
+.env.*
