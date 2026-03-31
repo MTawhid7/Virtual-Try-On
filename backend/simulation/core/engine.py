@@ -106,17 +106,21 @@ class SimulationEngine:
                 # 1. Predict: apply gravity, compute predicted positions
                 integrator.predict(state)
 
-                # 2. Solve constraints (XPBD iterations)
+                # 2. Reset Lagrange multipliers (no warm starting — Vestra lesson)
+                if self.solver is not None and hasattr(self.solver, 'reset_lambdas'):
+                    self.solver.reset_lambdas()
+
+                # 3. Solve constraints (XPBD iterations)
                 if self.solver is not None:
                     for _iteration in range(config.solver_iterations):
                         self.solver.step(state, config.substep_dt)
 
-                        # 3. Collision (interleaved inside solver loop)
+                        # 4. Collision (interleaved inside solver loop)
                         # Will be added in Sprint 1 Layer 3a / Sprint 2
                         if self.collider is not None:
                             self.collider.resolve(state, config.collision_thickness)
 
-                # 4. Update velocities from position delta + damping
+                # 5. Update velocities from position delta + damping
                 integrator.update(state)
 
             if progress_callback:

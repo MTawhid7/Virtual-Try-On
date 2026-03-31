@@ -47,6 +47,9 @@ pip install -r requirements.txt
 ```bash
 # Layer 1: Freefall test (gravity only, no constraints)
 python -m simulation --scene freefall
+
+# Layer 2: Constrained fall (distance + bending, pinned corners)
+python -m simulation --scene constrained_fall
 ```
 
 ### Test
@@ -60,7 +63,7 @@ python -m pytest tests/ -v
 | Phase | Status | Description |
 |-------|--------|-------------|
 | **Sprint 1, Layer 1** | ✅ | Particle system — gravity, integration, grid mesh |
-| **Sprint 1, Layer 2** | ⬜ | Distance + bending constraints |
+| **Sprint 1, Layer 2** | ✅ | Distance + bending constraints, XPBD solver |
 | **Sprint 1, Layer 3a** | ⬜ | Sphere collision (analytical) |
 | **Sprint 1, Layer 3b** | ⬜ | glTF export |
 | **Sprint 2** | ⬜ | Body mesh collision, stitch, patterns, garment pipeline |
