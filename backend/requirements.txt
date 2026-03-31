@@ -1,0 +1,13 @@
+# Core simulation
+taichi>=1.7.0
+numpy>=1.24.0
+trimesh[easy]>=4.0.0
+mapbox-earcut>=1.0.0
+
+# Testing
+pytest>=7.0
+
+# API (Sprint 3)
+# fastapi>=0.100
+# uvicorn[standard]>=0.24
+# pydantic>=2.0
