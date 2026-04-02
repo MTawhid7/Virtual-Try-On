@@ -22,7 +22,9 @@ backend/
 │   └── export/          glTF/GLB output
 ├── app/                 ← FastAPI web layer (Sprint 3)
 ├── data/                Body models, pattern JSONs
-└── tests/
+├── tests/
+│   ├── unit/            ← Component-level math & logic tests
+│   └── integration/     ← Layer-by-layer physics validation
 ```
 
 ## Quick Start
@@ -50,12 +52,26 @@ python -m simulation --scene freefall
 
 # Layer 2: Constrained fall (distance + bending, pinned corners)
 python -m simulation --scene constrained_fall
+
+# Layer 3a: Analytical sphere collision with live visualization!
+python -m simulation --scene sphere_drape -v
 ```
+
+> **Tip:** You can append `--visualize` or `-v` to any scene to watch it render in real-time instead of just dumping static files. Visuals export cleanly to `backend/outputs/`.
 
 ### Test
 
+All tests are located in the `backend/tests/` directory. Run then from the `backend/` root:
+
 ```bash
+# Run all tests
 python -m pytest tests/ -v
+
+# Run only unit tests
+python -m pytest tests/unit/ -v
+
+# Run only layer-by-layer integration tests
+python -m pytest tests/integration/ -v
 ```
 
 ## Development Phases
@@ -64,7 +80,7 @@ python -m pytest tests/ -v
 |-------|--------|-------------|
 | **Sprint 1, Layer 1** | ✅ | Particle system — gravity, integration, grid mesh |
 | **Sprint 1, Layer 2** | ✅ | Distance + bending constraints, XPBD solver |
-| **Sprint 1, Layer 3a** | ⬜ | Sphere collision (analytical) |
+| **Sprint 1, Layer 3a** | ✅ | Sphere collision (analytical & visualizer implementations) |
 | **Sprint 1, Layer 3b** | ⬜ | glTF export |
 | **Sprint 2** | ⬜ | Body mesh collision, stitch, patterns, garment pipeline |
 | **Sprint 3** | ⬜ | FastAPI backend, Next.js + R3F frontend |
