@@ -2,6 +2,35 @@
 
 This document organizes progress history, encountered issues, structural adjustments, and future plans to serve as a reliable reference point across development sprints.
 
+### 📅 April 2, 2026 (PM): Sprint 1 Complete — Layer 3b glTF Export
+
+**Status:** ✅ Sprint 1 Fully Complete
+**Focus:** Implementing glTF/GLB export and closing out Sprint 1 validation.
+
+#### Completed Work
+- **`simulation/export/gltf_writer.py`:** Created stateless `write_glb()` function using `trimesh` to produce binary `.glb` files. Handles vertex positions, faces, pre-computed normals, and optional UVs. Input validation, automatic parent directory creation, `process=False` to preserve vertex indexing.
+- **`SimResult.export_glb()`:** Added convenience method to the engine result dataclass. Lazy-imports trimesh to keep it out of the engine hot path.
+- **CLI `--output`/`-o` flag:** Default output path is `storage/{scene}.glb`. All three scenes (freefall, constrained_fall, sphere_drape) now export `.glb` instead of `.obj`.
+- **Output directory:** Standardized on `storage/` at project root (matches architecture diagram), replacing the ad-hoc `backend/outputs/` OBJ dumps.
+- **Test suite expanded to 74 tests:**
+  - 12 new unit tests: file creation, trimesh roundtrip, vertex/face/normal preservation, UV optionality, parent dir creation, input validation
+  - 6 new integration tests: sphere drape export roundtrip, position matching, unit-length normals, NaN checks, `SimResult.export_glb()` convenience method
+
+#### Sprint 1 Validation Checklist — Final Results
+| # | Check | Result |
+|---|-------|--------|
+| 1 | Particles under gravity: y-acceleration ≈ -9.81 m/s² | ✅ |
+| 2 | Pinned cloth hangs naturally (distance + bending) | ✅ |
+| 3 | No NaN in any field after 120 frames | ✅ |
+| 4 | Cloth does not penetrate sphere | ✅ |
+| 5 | Cloth does not oscillate indefinitely (KE → 0) | ✅ |
+| 6 | Exported `.glb` loads in trimesh with correct geometry | ✅ |
+
+#### Design Decisions
+- **Cloth-only export:** The `.glb` contains only the simulation output mesh. Collision geometry (sphere/body) is excluded from the export — the `-v` flag provides live visualization with both meshes for debugging. This keeps exports clean for the frontend viewer in Sprint 3.
+- **`storage/` over `outputs/`:** Matches the original architecture diagram. Simulation outputs are separate from source code, at the project root level.
+- **Mannequin GLB deferred:** User has a mannequin `.glb` ready for Sprint 2 body mesh collision. Not needed for Sprint 1's analytical sphere.
+
 ### 📅 April 2, 2026: Sprint 1 Layer 3a Finalization - Analytic Collisions and Visual Pipelines
 
 **Status:** Completed

@@ -7,7 +7,7 @@ from simulation.core.state import ParticleState
 from simulation.mesh.grid import generate_grid
 from simulation.scenes.visualizer import visualize_simulation
 
-def run_freefall(visualize: bool = False) -> None:
+def run_freefall(visualize: bool = False, output_path: str = "storage/freefall.glb") -> None:
     """Layer 1 test: drop a 10×10 grid under gravity, no constraints."""
     print("=== Freefall Scene ===")
     print("Dropping a 10×10 cloth grid under gravity (no constraints)...\n")
@@ -44,7 +44,8 @@ def run_freefall(visualize: bool = False) -> None:
         elapsed = time.perf_counter() - start_time
         print()  # newline after progress
 
-    final_y = state.get_positions_numpy()[:, 1]
+    final_positions = state.get_positions_numpy()
+    final_y = final_positions[:, 1]
     print(f"\n  Final Y (mean): {np.mean(final_y):.4f} m")
     print(f"  Final Y (std):  {np.std(final_y):.6f} m")
 
@@ -54,5 +55,12 @@ def run_freefall(visualize: bool = False) -> None:
     print(f"  Expected Y:     {expected_y:.4f} m (analytical freefall)")
     print(f"  Error:          {abs(np.mean(final_y) - expected_y):.6f} m")
 
-    has_nan = np.any(np.isnan(state.get_positions_numpy()))
+    has_nan = np.any(np.isnan(final_positions))
     print(f"  NaN check: {'FAIL ❌' if has_nan else 'PASS ✅'}")
+
+    # --- Export to glTF (.glb) ---
+    from simulation.core.engine import compute_vertex_normals
+    normals = compute_vertex_normals(final_positions, grid.faces)
+    from simulation.export import write_glb
+    out = write_glb(final_positions, grid.faces, normals, path=output_path)
+    print(f"\n  Exported to {out}")

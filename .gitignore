@@ -27,6 +27,7 @@ ti_cache/
 
 # Simulation output
 storage/
+outputs/
 *.glb
 *.gltf
 

@@ -1,5 +1,4 @@
 import time
-import os
 import numpy as np
 
 from simulation.core.config import SimConfig
@@ -10,7 +9,7 @@ from simulation.scenes.visualizer import visualize_simulation
 from simulation.constraints import build_constraints
 from simulation.solver.xpbd import XPBDSolver
 
-def run_constrained_fall(visualize: bool = False) -> None:
+def run_constrained_fall(visualize: bool = False, output_path: str = "storage/constrained_fall.glb") -> None:
     """Layer 2 test: pin top-two corners, drop grid with distance + bending constraints."""
     print("=== Constrained Fall Scene ===")
     print("Pinning top-left + top-right corners, dropping with distance + bending...\n")
@@ -107,12 +106,9 @@ def run_constrained_fall(visualize: bool = False) -> None:
     print(f"  Mean stretch: {mean_stretch:.4%} {'PASS ✅' if mean_stretch < 0.05 else 'FAIL ❌'}")
     print(f"  Max stretch:  {max_stretch:.4%}")
 
-    # 6. Export to OBJ for visual confirmation
-    os.makedirs("outputs", exist_ok=True)
-    print("\n  Exporting to outputs/constrained_fall.obj for visual confirmation...")
-    with open("outputs/constrained_fall.obj", "w") as f:
-        for v in final_positions:
-            f.write(f"v {v[0]:.6f} {v[1]:.6f} {v[2]:.6f}\n")
-        for face in grid.faces:
-            f.write(f"f {face[0]+1} {face[1]+1} {face[2]+1}\n")
-    print("  Done. You can open outputs/constrained_fall.obj in macOS Preview or Blender.")
+    # --- Export to glTF (.glb) ---
+    from simulation.core.engine import compute_vertex_normals
+    normals = compute_vertex_normals(final_positions, grid.faces)
+    from simulation.export import write_glb
+    out = write_glb(final_positions, grid.faces, normals, path=output_path)
+    print(f"\n  Exported to {out}")

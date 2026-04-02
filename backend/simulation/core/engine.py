@@ -8,6 +8,7 @@ This is the entry point for running a simulation programmatically.
 from __future__ import annotations
 
 from dataclasses import dataclass
+from pathlib import Path
 
 import numpy as np
 from numpy.typing import NDArray
@@ -26,6 +27,30 @@ class SimResult:
     faces: NDArray[np.int32]         # (F, 3) triangle indices
     normals: NDArray[np.float32]     # (N, 3) vertex normals
     uvs: NDArray[np.float32] | None  # (N, 2) UV coordinates
+
+    def export_glb(self, path: str | Path) -> Path:
+        """
+        Export this result to a binary glTF (.glb) file.
+
+        Convenience wrapper around simulation.export.write_glb.
+        Lazy-imports to avoid circular deps and keep trimesh out of
+        the engine hot path.
+
+        Args:
+            path: Output file path (.glb).
+
+        Returns:
+            Resolved Path to the written file.
+        """
+        from simulation.export.gltf_writer import write_glb
+
+        return write_glb(
+            positions=self.positions,
+            faces=self.faces,
+            normals=self.normals,
+            uvs=self.uvs,
+            path=path,
+        )
 
 
 def compute_vertex_normals(

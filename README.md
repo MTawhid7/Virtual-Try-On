@@ -55,6 +55,13 @@ python -m simulation --scene constrained_fall
 
 # Layer 3a: Analytical sphere collision with live visualization!
 python -m simulation --scene sphere_drape -v
+
+# Layer 3b: Export to .glb (default: storage/{scene}.glb)
+python -m simulation --scene sphere_drape
+# → storage/sphere_drape.glb
+
+# Export to custom path
+python -m simulation --scene sphere_drape -o my_output.glb
 ```
 
 > **Tip:** You can append `--visualize` or `-v` to any scene to watch it render in real-time instead of just dumping static files. Visuals export cleanly to `backend/outputs/`.
@@ -81,7 +88,7 @@ python -m pytest tests/integration/ -v
 | **Sprint 1, Layer 1** | ✅ | Particle system — gravity, integration, grid mesh |
 | **Sprint 1, Layer 2** | ✅ | Distance + bending constraints, XPBD solver |
 | **Sprint 1, Layer 3a** | ✅ | Sphere collision (analytical & visualizer implementations) |
-| **Sprint 1, Layer 3b** | ⬜ | glTF export |
+| **Sprint 1, Layer 3b** | ✅ | glTF export — `write_glb()` via trimesh, `SimResult.export_glb()`, CLI `--output` flag |
 | **Sprint 2** | ⬜ | Body mesh collision, stitch, patterns, garment pipeline |
 | **Sprint 3** | ⬜ | FastAPI backend, Next.js + R3F frontend |
 | **Sprint 4** | ⬜ | Integration, polish, end-to-end testing |

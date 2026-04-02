@@ -11,7 +11,7 @@ from simulation.constraints import build_constraints
 from simulation.solver.xpbd import XPBDSolver
 from simulation.collision import SphereCollider
 
-def run_sphere_drape(visualize: bool = False) -> None:
+def run_sphere_drape(visualize: bool = False, output_path: str = "storage/sphere_drape.glb") -> None:
     """Layer 3a test: drop a 20×20 cloth grid onto an analytical sphere."""
     print("=== Sphere Drape Scene ===")
     print("Dropping a 20×20 cloth grid onto a sphere with collision...\n")
@@ -128,30 +128,10 @@ def run_sphere_drape(visualize: bool = False) -> None:
     print(f"  Mean stretch: {mean_stretch:.4%} {'PASS ✅' if mean_stretch < 0.10 else 'FAIL ❌'}")
     print(f"  Max stretch:  {max_stretch:.4%}")
 
-    # 8. Export to OBJ
-    os.makedirs("outputs", exist_ok=True)
-    print("\n  Exporting to outputs/sphere_drape.obj for visual confirmation...")
-    with open("outputs/sphere_drape.obj", "w") as f:
-        # Write cloth vertices
-        for v in final_positions:
-            f.write(f"v {v[0]:.6f} {v[1]:.6f} {v[2]:.6f}\n")
-            
-        import trimesh
-        # Add sphere geometry
-        sphere = trimesh.creation.icosphere(subdivisions=3, radius=sphere_radius)
-        sphere.apply_translation(sphere_center)
-        
-        # Write sphere vertices
-        for v in sphere.vertices:
-            f.write(f"v {v[0]:.6f} {v[1]:.6f} {v[2]:.6f}\n")
-
-        # Write cloth faces
-        for face in grid.faces:
-            f.write(f"f {face[0]+1} {face[1]+1} {face[2]+1}\n")
-
-        # Write sphere faces (offset by the number of cloth vertices)
-        offset = len(final_positions)
-        for face in sphere.faces:
-            f.write(f"f {face[0]+offset+1} {face[1]+offset+1} {face[2]+offset+1}\n")
-            
-    print("  Done. Open outputs/sphere_drape.obj in macOS Preview or Blender.")
+    # --- Export to glTF (.glb) ---
+    from simulation.core.engine import compute_vertex_normals
+    normals = compute_vertex_normals(final_positions, grid.faces)
+    from simulation.export import write_glb
+    out = write_glb(final_positions, grid.faces, normals, path=output_path)
+    print(f"\n  Exported to {out}")
+    print("  Open in Blender, three.js, or https://gltf-viewer.donmccurdy.com/")

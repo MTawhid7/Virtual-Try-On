@@ -35,13 +35,20 @@ If you are extending the system, please strictly follow these rules to maintain 
 5. **Decoupled Validations:** We require strict mathematical unit testing natively executing independently without the core `__main__.py` loop before we accept pull logic into full scale integration files simulating across structural geometries.
 
 ## 🚀 Current Technical State
-**Stage:** Sprint 1, Layer 3a Completed 
-We are utilizing full XPBD iteration techniques mapping native gravitation drops alongside active distance limits and analytical sphere collisions cleanly out of the Taichi GPU system.
+**Stage:** Sprint 1 Complete ✅ 
+All four layers of Sprint 1 ("A Cloth That Falls and Drapes") are implemented and validated:
+- **Layer 1:** Particle system — gravity, semi-implicit Euler, SoA Taichi fields
+- **Layer 2:** Distance + bending constraints — full XPBD with Lagrange multipliers
+- **Layer 3a:** Analytical sphere collision — interleaved inside solver loop, position-based friction
+- **Layer 3b:** glTF export — `write_glb()` via trimesh, `SimResult.export_glb()`, CLI `--output`/`-o` flag
 
 **Abilities Available:**
-- Can spawn freeform grids alongside collision bodies mapped across distance and isometric bending constraints physically resolving inside standard Python environments perfectly decoupled from dependencies.
-- Complete live visual integration pipeline invoking cross-platform Taichi `window` GUI debugging parameters seamlessly triggered via `-v` flags.
+- Full XPBD simulation pipeline: grid mesh → gravity → distance + bending constraints → sphere collision → `.glb` export
+- Live visualization via `-v` flag (Taichi GGUI window with orbit controls)
+- CLI entry point: `python -m simulation --scene {freefall,constrained_fall,sphere_drape} [-v] [-o path.glb]`
+- 74 automated tests (unit + integration) covering all layers
 
-**Next Steps & Implementation Horizons:**
-- **Layer 3b:** Developing static `.glb` sequences bypassing rigid `.obj` outputs scaling toward true sequential outputs.
-- **Sprint 2:** Removing Analytical Sphere functions to implement scalable generic Spatial Hashing targeting arbitrary incoming standard mesh bodies. Incorporate robust velocity boundary clamps directly into the interaction logic preventing "bounce" discrepancies.
+**Next Steps — Sprint 2: Garment Pipeline ("A T-Shirt on a Body"):**
+- **Layer 3a-extended:** Replace analytical sphere with spatial hash + point-triangle body mesh collision (`BodyCollider`)
+- **Layer 3b-extended:** Pattern JSON → earcut triangulation → panel placement → stitch constraints → body drape
+- **Full integration:** `python -m simulation --pattern tshirt --fabric cotton` → `storage/tshirt_cotton.glb`
