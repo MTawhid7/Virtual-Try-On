@@ -76,6 +76,37 @@ class SimulationEngine:
         # Collider will be set in Sprint 2
         self.collider = None
 
+    def step_frame(self, state: ParticleState) -> None:
+        """Run one full frame of simulation (executes multiple substeps)."""
+        config = self.config
+        # Integrator is stateless, so instantiating here is extremely lightweight
+        integrator = Integrator(
+            dt=config.substep_dt,
+            gravity=config.gravity,
+            damping=config.damping,
+            max_displacement=config.max_displacement,
+        )
+
+        for _substep in range(config.substeps):
+            # 1. Predict: apply gravity, compute predicted positions
+            integrator.predict(state)
+
+            # 2. Reset Lagrange multipliers (no warm starting — Vestra lesson)
+            if self.solver is not None and hasattr(self.solver, 'reset_lambdas'):
+                self.solver.reset_lambdas()
+
+            # 3. Solve constraints (XPBD iterations)
+            if self.solver is not None:
+                for _iteration in range(config.solver_iterations):
+                    self.solver.step(state, config.substep_dt)
+
+                    # 4. Collision (interleaved inside solver loop)
+                    if self.collider is not None:
+                        self.collider.resolve(state, config)
+
+            # 5. Update velocities from position delta + damping
+            integrator.update(state)
+
     def run(self, state: ParticleState, progress_callback=None) -> SimResult:
         """
         Run the full simulation loop.
@@ -88,12 +119,6 @@ class SimulationEngine:
             SimResult with final positions, faces, normals, UVs.
         """
         config = self.config
-        integrator = Integrator(
-            dt=config.substep_dt,
-            gravity=config.gravity,
-            damping=config.damping,
-            max_displacement=config.max_displacement,
-        )
 
         # Initialize solver if present
         if self.solver is not None:
@@ -101,27 +126,7 @@ class SimulationEngine:
 
         # --- Main simulation loop ---
         for frame in range(config.total_frames):
-            for _substep in range(config.substeps):
-
-                # 1. Predict: apply gravity, compute predicted positions
-                integrator.predict(state)
-
-                # 2. Reset Lagrange multipliers (no warm starting — Vestra lesson)
-                if self.solver is not None and hasattr(self.solver, 'reset_lambdas'):
-                    self.solver.reset_lambdas()
-
-                # 3. Solve constraints (XPBD iterations)
-                if self.solver is not None:
-                    for _iteration in range(config.solver_iterations):
-                        self.solver.step(state, config.substep_dt)
-
-                        # 4. Collision (interleaved inside solver loop)
-                        # Will be added in Sprint 1 Layer 3a / Sprint 2
-                        if self.collider is not None:
-                            self.collider.resolve(state, config)
-
-                # 5. Update velocities from position delta + damping
-                integrator.update(state)
+            self.step_frame(state)
 
             if progress_callback:
                 progress_callback(frame + 1, config.total_frames)
