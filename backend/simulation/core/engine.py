@@ -118,7 +118,7 @@ class SimulationEngine:
                         # 4. Collision (interleaved inside solver loop)
                         # Will be added in Sprint 1 Layer 3a / Sprint 2
                         if self.collider is not None:
-                            self.collider.resolve(state, config.collision_thickness)
+                            self.collider.resolve(state, config)
 
                 # 5. Update velocities from position delta + damping
                 integrator.update(state)
