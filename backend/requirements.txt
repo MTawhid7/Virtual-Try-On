@@ -12,3 +12,4 @@ pytest>=7.0
 # fastapi>=0.100
 # uvicorn[standard]>=0.24
 # pydantic>=2.0
+pyglet<2

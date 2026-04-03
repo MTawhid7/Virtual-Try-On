@@ -73,25 +73,26 @@ def resolve_body_collision(
         iy0 = ti.cast(ti.floor(p.y / cell_size), ti.i32)
         iz0 = ti.cast(ti.floor(p.z / cell_size), ti.i32)
 
-        # Track the shallowest (outermost) penetrating contact.
-        # We use MAX sd (closest to 0 from below = least penetrating) rather than
-        # min sd for two reasons:
-        #   1. The outermost surface is what the cloth particle actually touches.
-        #   2. Hash collisions produce false-hit triangles from distant mesh regions.
-        #      These have large negative sd (particle is far on the "wrong" side)
-        #      and would incorrectly "win" a min-sd comparison. They are excluded
-        #      by the Euclidean distance threshold below.
-        best_sd = ti.f32(-1e9)   # track MAX sd < thickness (shallowest penetration)
+        # Track the NEAREST candidate triangle (minimum Euclidean distance to
+        # closest point). The nearest surface is physically what the cloth touches.
+        # Hash-collision false hits from distant mesh regions are by definition
+        # farther away and will not win the min-euclidean comparison.
+        # Response is only applied if the nearest triangle is actually penetrating
+        # (best_sd < thickness). This replaces the previous MAX-sd (shallowest
+        # penetration) strategy, which was unstable with a tight Euclidean guard:
+        # when a wrong-normal triangle happened to win max-sd, it injected energy.
+        best_euclidean = ti.f32(1e9)  # track MIN euclidean (nearest surface)
+        best_sd = ti.f32(0.0)         # sd of the nearest candidate
         best_closest = ti.math.vec3(0.0, 0.0, 0.0)
         best_normal = ti.math.vec3(0.0, 1.0, 0.0)
         found = ti.i32(0)
 
-        # Maximum Euclidean distance to a closest point to consider as a valid contact.
-        # With cell_size ≈ 0.016m and 3×3×3 search (radius 0.048m), legitimate contacts
-        # are within ~0.05m. False hash-collision hits place triangles 0.5m+ away.
-        # 0.1m (10cm) is generous enough to catch all real contacts while excluding
-        # false hits from hash collisions.
-        max_contact_dist = ti.f32(0.10)
+        # Euclidean guard: discard candidates whose closest point is further than
+        # 2×cell_size from the particle. The 3×3×3 search covers ±1.5×cell_size,
+        # so all geometrically plausible contacts are within this range. Hash
+        # collisions placing triangles from distant body regions (e.g. a foot
+        # triangle appearing for a shoulder particle) are well outside it.
+        max_contact_dist = cell_size * 2.0
 
         # Search 27-cell (3×3×3) neighborhood
         for di in ti.static(range(-1, 2)):
@@ -158,27 +159,26 @@ def resolve_body_collision(
 
                         sd = signed_distance_to_triangle(p, closest, n0, n1, n2, bary)
 
-                        # Contact: particle is within the collision shell (sd < thickness).
-                        # Track the SHALLOWEST penetrating triangle (MAX sd < threshold).
-                        # Shallowest = outermost surface = smallest correction vector.
-                        # Deep false hits (large negative sd from interior surfaces or
-                        # mesh artifacts) are excluded by the Euclidean guard above, but
-                        # MAX-sd also makes the response more stable numerically.
-                        if sd < thickness:
-                            if sd > best_sd:
-                                best_sd = sd
-                                best_closest = closest
-                                # Reconstruct interpolated normal for response
-                                interp_n = bary_u * n0 + bary_v * n1 + bary_w * n2
-                                n_len = interp_n.norm()
-                                if n_len > 1e-8:
-                                    best_normal = interp_n / n_len
-                                else:
-                                    best_normal = ti.math.vec3(0.0, 1.0, 0.0)
-                                found = 1
+                        # Select the nearest candidate (min euclidean). We track ALL
+                        # candidates within the Euclidean guard, updating whenever a
+                        # closer triangle is found. The collision response is applied
+                        # at the end only if the nearest triangle is penetrating.
+                        if euclidean < best_euclidean:
+                            best_euclidean = euclidean
+                            best_sd = sd
+                            best_closest = closest
+                            # Reconstruct interpolated normal for response
+                            interp_n = bary_u * n0 + bary_v * n1 + bary_w * n2
+                            n_len = interp_n.norm()
+                            if n_len > 1e-8:
+                                best_normal = interp_n / n_len
+                            else:
+                                best_normal = ti.math.vec3(0.0, 1.0, 0.0)
+                            found = 1
 
-        # Apply collision response for closest penetrating triangle
-        if found == 1:
+        # Apply collision response only if the nearest triangle is penetrating.
+        outward_check = (p - best_closest).dot(best_normal)
+        if found == 1 and best_sd < thickness:
             surface_pos = best_closest + thickness * best_normal
 
             # Position-based friction (same as SphereCollider):

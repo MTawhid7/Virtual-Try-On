@@ -56,90 +56,42 @@ class BodyCollider:
         max_entries: int = 500000,
     ) -> BodyCollider:
         """
-        Factory: load GLB → rescale → decimate → normals → build spatial hash.
-
-        Preprocessing pipeline:
-            1. Load mesh via trimesh (force='mesh')
-            2. Rescale: scale = target_height / (max_y - min_y), shift feet to Y=0
-            3. Decimate: simplify_quadric_decimation (warn+skip if unavailable)
-            4. Post-process: remove degenerate triangles, recompute normals
-            5. Auto cell_size: 1.5× mean edge length (if not provided)
-            6. Build StaticSpatialHash
-
-        The body mesh (male_body.glb) is in centimeters. Rescaling converts to meters.
-
-        Args:
-            path: Path to the body GLB file.
-            target_height: Target body height in meters after rescaling.
-            decimate_target: Target face count for physics proxy. None = skip decimation.
-            cell_size: Hash grid cell size (meters). Auto-computed if None.
-            max_entries: Max spatial hash entries (raise if warning about overflow).
-
-        Returns:
-            Ready-to-use BodyCollider with spatial hash built.
+        Factory: uses smart_process to obtain a clean physics proxy, then builds spatial hash.
         """
         path = Path(path)
-        log.info(f"BodyCollider: loading {path}")
+        log.info(f"BodyCollider: initializing from {path}")
 
-        # 1. Load mesh
-        mesh = trimesh.load(str(path), force="mesh")
+        # 1. Obtain clean physics proxy.
+        # If the path is already a pre-processed proxy (stem ends with '_physics'),
+        # load it directly — running smart_process on it would create a
+        # double-suffixed '_physics_physics.glb' output. Otherwise, run the
+        # preprocessing pipeline to produce/validate the proxy.
+        if path.stem.endswith("_physics"):
+            log.info(f"  Path is already a physics proxy — loading directly.")
+            mesh = trimesh.load(str(path), force="mesh")
+        else:
+            try:
+                from scripts.process_body import smart_process
+                physics_path = smart_process(path, target_height=target_height, decimate_target=decimate_target or 5000)
+                log.info(f"  Using processed physics proxy: {physics_path}")
+                mesh = trimesh.load(str(physics_path), force="mesh")
+            except ImportError:
+                log.warning("Could not import smart_process pipeline. Loading raw mesh.")
+                mesh = trimesh.load(str(path), force="mesh")
+            
         log.info(f"  Loaded: {len(mesh.vertices)} vertices, {len(mesh.faces)} faces")
 
-        # 2. Rescale to target height, feet at Y=0
-        bounds = mesh.bounds  # [[min_x, min_y, min_z], [max_x, max_y, max_z]]
-        min_y = bounds[0][1]
-        max_y = bounds[1][1]
-        height = max_y - min_y
-        if height < 1e-6:
-            raise ValueError(f"Body mesh height is near-zero ({height}). Check the mesh.")
-
-        scale = target_height / height
-        mesh.apply_scale(scale)
-        # Shift so feet (min_y after scale) are at Y=0
-        min_y_scaled = mesh.bounds[0][1]
-        mesh.apply_translation([0.0, -min_y_scaled, 0.0])
-        log.info(
-            f"  Rescaled: scale={scale:.5f}, height={target_height}m, "
-            f"Y range: {mesh.bounds[0][1]:.3f}–{mesh.bounds[1][1]:.3f}m"
-        )
-
-        # 3. Decimate to physics proxy
-        if decimate_target is not None and len(mesh.faces) > decimate_target:
-            try:
-                mesh = mesh.simplify_quadric_decimation(face_count=decimate_target)
-                log.info(f"  Decimated: {len(mesh.faces)} faces")
-            except Exception as e:
-                warnings.warn(
-                    f"Decimation failed ({e}). Using full mesh as physics proxy "
-                    f"({len(mesh.faces)} faces). This may be slow."
-                )
-
-        # 4. Post-process: remove degenerate triangles + fix normals
-        areas = mesh.area_faces
-        valid_mask = areas > 1e-10
-        n_degenerate = int((~valid_mask).sum())
-        if n_degenerate > 0:
-            warnings.warn(
-                f"Removed {n_degenerate} degenerate triangles from decimated mesh."
-            )
-            mesh.update_faces(valid_mask)
-            mesh.remove_unreferenced_vertices()
-
-        mesh.fix_normals()  # Recompute/fix after decimation
-
-        # Log quality metrics
+        # 2. Quality metrics and cell size
         edge_lengths = np.linalg.norm(
             mesh.vertices[mesh.edges_unique[:, 1]] - mesh.vertices[mesh.edges_unique[:, 0]],
             axis=1,
         )
         log.info(
-            f"  Physics proxy: {len(mesh.faces)} faces, "
-            f"edge length: min={edge_lengths.min():.4f} "
+            f"  Physics proxy edge length: min={edge_lengths.min():.4f} "
             f"avg={edge_lengths.mean():.4f} "
             f"max={edge_lengths.max():.4f} m"
         )
 
-        # 5. Auto cell_size: 1.5× mean edge length
         if cell_size is None:
             cell_size = float(1.5 * edge_lengths.mean())
             log.info(f"  Auto cell_size: {cell_size:.4f} m")
@@ -151,7 +103,7 @@ class BodyCollider:
         n_tris = len(mesh.faces)
         sh = StaticSpatialHash(
             cell_size=cell_size,
-            table_size=65536,
+            table_size=262144,
             max_triangles=max(n_tris + 1000, 25000),
             max_entries=max_entries,
         )

@@ -4,6 +4,63 @@ This document organizes progress history, encountered issues, structural adjustm
 
 ---
 
+### 📅 April 3, 2026: Sprint 2 Layer 3a — Collision Resolver Investigation & Mesh Pipeline
+
+**Status:** ⚠️ In Progress — 10/12 integration tests passing (same count, different failing tests)  
+**Focus:** Fix the 2 remaining failing integration tests in the body mesh collision layer. Validate and stabilize the body mesh asset pipeline.
+
+#### Body Mesh Asset Pipeline
+
+The body mesh was replaced. The previous asset (`male_body.glb`) was a manual Blender export that suffered from the "polygon soup" problem — Blender's glTF exporter duplicated every vertex at edge boundaries due to custom split normals, inflating a 5,690-face mesh to 16,500 disconnected vertices that `merge_vertices()` could not weld. This was identified as the root cause of instability in prior testing.
+
+The new `mannequin.glb` (Sketchfab asset) was evaluated alongside a single-object re-export (`mannequin_2.glb`). Key findings:
+
+- `mannequin.glb` has 3 scene objects: body (5,390 verts, 8,844 faces) + 2 eye meshes (2×380 faces). `trimesh.load(force='mesh')` already merges them. The existing `smart_process` pipeline handles this correctly.
+- `mannequin_2.glb` (single object export) had a 6× worse avg edge length (0.124m vs 0.021m) — unusable as a physics asset. Deleted.
+- The processed `mannequin_physics.glb` (5,689 verts, 9,604 faces, avg_edge 0.021m, 1.75m tall) is confirmed as the correct physics asset. It has 59 disconnected components — inherent open-boundary topology, not a processing failure. `fill_holes()` was tested and made things worse (59 → 62 components).
+- Tests and scenes were updated to point directly to `mannequin_physics.glb`. `BodyCollider.from_glb()` was updated to detect the `_physics` suffix and skip `smart_process` (which would otherwise create a nonsensical `_physics_physics.glb` output).
+
+#### Collision Resolver Investigation
+
+The two failing tests are in tension with each other. Three candidate selection strategies were tested:
+
+**Strategy 1 (original): Max-sd + 0.10m Euclidean guard**  
+Tracks the shallowest penetrating triangle (maximum signed distance < thickness). Gives: energy_decay = 1.44 m/s (fails < 1.0), crumpling max_y = 2.05m (fails ≤ 1.85m). Root cause: false-hit triangles in the 0.063–0.10m euclidean range win the max-sd comparison when their normals happen to be close to 0.
+
+**Strategy 2: Max-sd + cell_size × 2.0 Euclidean guard (0.063m)**  
+Tightens the guard to scale with mesh resolution. Fixes crumpling (max_y ≤ 1.85m ✅) but causes energy explosion (35.9 m/s ❌). A wrong-normal triangle within the 0.063m zone wins max-sd and injects energy systematically every substep.
+
+**Strategy 3 (current code): Min-euclidean + cell_size × 2.0 Euclidean guard**  
+Selects the nearest triangle (minimum euclidean distance to closest point). Applies response only if nearest triangle has sd < thickness. Gives: energy_decay = 0.63 m/s ✅, crumpling max_y = 1.96m ❌ (still exceeds 1.85m by 0.11m). The upward crumpling is less severe than before but still fails. Cause: at mesh seam boundaries and open-boundary edges (59 disconnected components means seam edges are everywhere), the nearest triangle's interpolated normal is rotated relative to the true outward normal.
+
+The core dilemma: no single candidate selection strategy fixes both tests simultaneously given the current mesh geometry and test thresholds.
+
+#### Code Changes Made
+
+| File | Change |
+|------|--------|
+| `collision/resolver.py` | Candidate selection: max-sd → min-euclidean; Euclidean guard: hardcoded 0.10m → `cell_size * 2.0` |
+| `collision/body_collider.py` | Skip `smart_process` when path ends with `_physics` |
+| `scenes/body_drape.py` | Asset: `male_body.glb` → `mannequin_physics.glb` |
+| `tests/integration/test_layer3a_ext_body.py` | Asset: `male_body.glb` → `mannequin_physics.glb` |
+| `CLAUDE.md` | Updated Critical Constraints (i32 overflow, max_contact_dist), Body Mesh section, Current State |
+| `README.md` | Updated asset paths, status table, Quick Start |
+| `docs/` | Deleted 2 old handoffs → replaced with `handoff_sprint2_layer3a_complete.md` |
+
+#### Proposed Next Steps (Prioritized)
+
+1. **Add backface-cull check to min-euclidean response** — After selecting nearest triangle, verify `dot(p - closest, best_normal) >= 0` (particle is on outward side). Reject response if negative — this filters seam-boundary triangles whose normals are rotated inward. This is the most promising fix for the crumpling test while preserving energy stability.
+
+2. **Increase hash table size** — `StaticSpatialHash(table_size=262144)` reduces average bucket load from ~4.5 to ~1.1 entries, dramatically cutting false-hit candidate rate. Lower false-hit rate means fewer wrong-normal candidates in the search set.
+
+3. **Calibrate test thresholds** — The crumpling margin of 0.05m (1.85m threshold) may be too tight for this mesh's topology. If the backface-cull fix still gives 1.87–1.89m, raising to 0.10m (1.90m) is defensible. The energy threshold (1.0 m/s) appears reasonable and should not be loosened.
+
+4. **Full Sprint 1 regression** — `python -m pytest tests/ -v` has not been run since code changes. Confirm 74 Sprint 1 tests still pass.
+
+5. **Visual smoke test** — Run `python -m simulation --scene body_drape` and view `storage/body_drape.glb` in a glTF viewer to confirm shoulder drape with no visible penetration.
+
+---
+
 ### 📅 April 2, 2026 (Late PM): Sprint 2 Layer 3a-Extended — Body Mesh Collision
 
 **Status:** ⚠️ In Progress — 10/12 integration tests passing  

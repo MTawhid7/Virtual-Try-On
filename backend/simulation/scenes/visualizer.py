@@ -16,6 +16,7 @@ def visualize_simulation(
     config: SimConfig,
     sphere_center=None,
     sphere_radius=None,
+    body_mesh_path=None,
 ) -> None:
     """Launch Taichi GUI window and run the simulation live."""
     import taichi as ti
@@ -46,6 +47,17 @@ def visualize_simulation(
             sphere_f.from_numpy(sphere.faces.flatten().astype(np.int32))
         except ImportError:
             print("  [Warning] trimesh not installed, sphere proxy won't be drawn.")
+            
+    if body_mesh_path is not None:
+        try:
+            import trimesh
+            body = trimesh.load(body_mesh_path, force="mesh")
+            sphere_v = ti.Vector.field(3, dtype=ti.f32, shape=len(body.vertices))
+            sphere_v.from_numpy(body.vertices.astype(np.float32))
+            sphere_f = ti.field(dtype=ti.i32, shape=body.faces.size)
+            sphere_f.from_numpy(body.faces.flatten().astype(np.int32))
+        except Exception as e:
+            print(f"  [Warning] Could not load body mesh for visualizer: {e}")
 
     # Mesh rendering requires flattened indices array for faces
     indices = None

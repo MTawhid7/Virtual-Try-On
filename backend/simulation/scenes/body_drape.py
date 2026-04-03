@@ -24,7 +24,7 @@ from simulation.solver.xpbd import XPBDSolver
 
 
 # Canonical path to the body mesh (relative to the backend/ working directory)
-_BODY_GLB_PATH = "data/bodies/male_body.glb"
+_BODY_GLB_PATH = "data/bodies/mannequin_physics.glb"
 
 
 def run_body_drape(visualize: bool = False, output_path: str = "storage/body_drape.glb") -> None:
@@ -33,7 +33,7 @@ def run_body_drape(visualize: bool = False, output_path: str = "storage/body_dra
 
     Setup:
         - 30×30 grid, 1.2m × 1.2m, centered at (0, 1.8, 0) — above shoulders
-        - Body mesh: male_body.glb, rescaled to 1.75m, decimated to ~5K triangles
+        - Body mesh: mannequin_physics.glb (pre-processed physics proxy, 1.75m)
         - 120 frames, 6 substeps, 12 solver iterations (same as sphere_drape)
         - Cotton compliance: stretch=1e-8, bend=1e-3
 
@@ -103,15 +103,15 @@ def run_body_drape(visualize: bool = False, output_path: str = "storage/body_dra
     # --- Run ---
     start_time = time.perf_counter()
     if visualize:
-        # Visualizer for body mesh not yet implemented; fall through to non-visual run
-        print("  Note: body mesh visualizer not yet implemented; running non-visual.")
-
-    result = engine.run(
-        state,
-        progress_callback=lambda f, t: print(f"\r  Frame {f}/{t}", end="", flush=True),
-    )
-    elapsed = time.perf_counter() - start_time
-    print(f"\n  Elapsed: {elapsed:.3f}s ({elapsed / config.total_frames * 1000:.1f}ms/frame)")
+        from simulation.scenes.visualizer import visualize_simulation
+        visualize_simulation(engine, state, config, body_mesh_path=_BODY_GLB_PATH)
+    else:
+        result = engine.run(
+            state,
+            progress_callback=lambda f, t: print(f"\r  Frame {f}/{t}", end="", flush=True),
+        )
+        elapsed = time.perf_counter() - start_time
+        print(f"\n  Elapsed: {elapsed:.3f}s ({elapsed / config.total_frames * 1000:.1f}ms/frame)")
 
     final_positions = state.get_positions_numpy()
 

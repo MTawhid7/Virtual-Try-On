@@ -21,7 +21,7 @@ backend/
 │   ├── mesh/            Grid generation, pattern triangulation
 │   └── export/          glTF/GLB output
 ├── app/                 ← FastAPI web layer (Sprint 3)
-├── data/bodies/         Body GLB meshes (male_body.glb → physics proxy)
+├── data/bodies/         Body GLB meshes (mannequin.glb → mannequin_physics.glb proxy)
 ├── storage/             Simulation output .glb files
 ├── tests/
 │   ├── unit/            ← Component-level math & logic tests
@@ -59,6 +59,7 @@ python -m simulation --scene sphere_drape
 python -m simulation --scene sphere_drape -v   # live Taichi GGUI visualizer
 
 # Sprint 2 Layer 3a-Extended: cloth draped over body mesh
+# Requires data/bodies/mannequin_physics.glb (already in repo)
 python -m simulation --scene body_drape
 # → storage/body_drape.glb
 
@@ -91,7 +92,7 @@ python -m pytest tests/integration/ -v
 | **Sprint 1, Layer 2** | ✅ | Distance + bending constraints, XPBD solver |
 | **Sprint 1, Layer 3a** | ✅ | Sphere collision (analytical & visualizer implementations) |
 | **Sprint 1, Layer 3b** | ✅ | glTF export — `write_glb()` via trimesh, `SimResult.export_glb()`, CLI `--output` flag |
-| **Sprint 2, Layer 3a-Ext** | ⚠️ | Body mesh collision — `BodyCollider` (spatial hash + point-triangle). 10/12 integration tests pass; 2 failures under investigation |
+| **Sprint 2, Layer 3a-Ext** | ⚠️ | Body mesh collision — `BodyCollider` (spatial hash + point-triangle). 10/12 tests pass; candidate selection strategy under investigation (see `docs/handoff_sprint2_layer3a_complete.md`) |
 | **Sprint 2, Layer 3b-Ext** | ⬜ | Pattern JSON → earcut triangulation, stitch constraints, full garment pipeline |
 | **Sprint 3** | ⬜ | FastAPI backend, Next.js + R3F frontend |
 | **Sprint 4** | ⬜ | Integration, polish, end-to-end testing |
