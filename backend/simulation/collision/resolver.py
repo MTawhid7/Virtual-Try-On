@@ -177,8 +177,13 @@ def resolve_body_collision(
                             found = 1
 
         # Apply collision response only if the nearest triangle is penetrating.
+        # We also implement a "backface cull" with a depth limit: `outward_check >= -0.05`.
+        # By rejecting particles slightly "inside" a seam edge's interpolating normal,
+        # we prevent edge normal artifacts from causing severe crumpling. The `-0.05m` 
+        # depth threshold ensures that genuinely deep penetrations (tunneling pulled by
+        # connected constraints) are still resolutely pushed out.
         outward_check = (p - best_closest).dot(best_normal)
-        if found == 1 and best_sd < thickness:
+        if found == 1 and best_sd < thickness and outward_check >= -0.05:
             surface_pos = best_closest + thickness * best_normal
 
             # Position-based friction (same as SphereCollider):

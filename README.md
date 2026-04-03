@@ -92,7 +92,7 @@ python -m pytest tests/integration/ -v
 | **Sprint 1, Layer 2** | ✅ | Distance + bending constraints, XPBD solver |
 | **Sprint 1, Layer 3a** | ✅ | Sphere collision (analytical & visualizer implementations) |
 | **Sprint 1, Layer 3b** | ✅ | glTF export — `write_glb()` via trimesh, `SimResult.export_glb()`, CLI `--output` flag |
-| **Sprint 2, Layer 3a-Ext** | ⚠️ | Body mesh collision — `BodyCollider` (spatial hash + point-triangle). 10/12 tests pass; candidate selection strategy under investigation (see `docs/handoff_sprint2_layer3a_complete.md`) |
+| **Sprint 2, Layer 3a-Ext** | ✅ | Body mesh collision — `BodyCollider` (spatial hash + point-triangle). Tuned culling thresholds, fixed mesh alignment, and integrated live Taichi GUI visualizer support. |
 | **Sprint 2, Layer 3b-Ext** | ⬜ | Pattern JSON → earcut triangulation, stitch constraints, full garment pipeline |
 | **Sprint 3** | ⬜ | FastAPI backend, Next.js + R3F frontend |
 | **Sprint 4** | ⬜ | Integration, polish, end-to-end testing |

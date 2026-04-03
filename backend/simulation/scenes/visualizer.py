@@ -20,6 +20,11 @@ def visualize_simulation(
 ) -> None:
     """Launch Taichi GUI window and run the simulation live."""
     import taichi as ti
+    import os
+    
+    # Resolve paths before GUI initialization (macOS GUI initialization can change CWD to app bundle)
+    if body_mesh_path is not None:
+        body_mesh_path = os.path.abspath(body_mesh_path)
     
     print("\n  [Live Visualizer] Initializing Taichi Window (1024x1024)...")
     window = ti.ui.Window("Garment Simulation - Live", (1024, 1024))
