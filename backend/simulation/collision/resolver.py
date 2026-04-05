@@ -194,3 +194,15 @@ def resolve_body_collision(
             d_normal = disp.dot(best_normal) * best_normal
             d_tangential = disp - d_normal
             positions[i] = predicted[i] + d_normal + d_tangential * (1.0 - friction)
+
+        # Resting contact friction: particle is in the contact zone but NOT penetrating.
+        # Using elif guarantees mutual exclusion with the penetration block above —
+        # the same outward_check value is reused, no second spatial query needed.
+        # Applies tangential velocity damping without a normal push-out correction.
+        # This prevents cloth from sliding off curved surfaces under gravity when
+        # not actively penetrating. (Bridson et al. 2002 §4.3 — velocity-level friction)
+        elif found == 1 and best_euclidean < thickness * 5.0 and outward_check >= -0.05:
+            curr_disp = positions[i] - predicted[i]
+            d_normal_rest = curr_disp.dot(best_normal) * best_normal
+            d_tang_rest = curr_disp - d_normal_rest
+            positions[i] = predicted[i] + d_normal_rest + d_tang_rest * (1.0 - friction)

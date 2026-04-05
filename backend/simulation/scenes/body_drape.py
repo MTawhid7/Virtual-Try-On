@@ -1,25 +1,25 @@
 """
 Body drape scene — Sprint 2 Layer 3a-Extended demo.
 
-Drops a 30×30 cloth grid onto the mannequin body mesh to validate the full
+Drops a 60×60 cloth grid onto the mannequin body mesh to validate the full
 body mesh collision pipeline (spatial hash + point-triangle projection).
 
 This scene mirrors sphere_drape.py in structure, with the same 6 validation
 checks, replacing SphereCollider with BodyCollider.
 """
 
-import os
 import time
 
 import numpy as np
 
-from simulation.collision import BodyCollider
+from simulation.collision import BodyCollider, ClothSelfCollider
 from simulation.constraints import build_constraints
 from simulation.core.config import SimConfig
 from simulation.core.engine import SimulationEngine, compute_vertex_normals
 from simulation.core.state import ParticleState
 from simulation.export import write_glb
-from simulation.mesh.grid import generate_grid
+from simulation.materials import FABRIC_PRESETS
+from simulation.mesh.grid import compute_area_weighted_inv_masses, generate_grid
 from simulation.solver.xpbd import XPBDSolver
 
 
@@ -29,13 +29,16 @@ _BODY_GLB_PATH = "data/bodies/mannequin_physics.glb"
 
 def run_body_drape(visualize: bool = False, output_path: str = "storage/body_drape.glb") -> None:
     """
-    Sprint 2 Layer 3a-Extended: drop a 30×30 cloth grid onto the body mesh.
+    Sprint 2 Layer 3a-Extended: drop a 60×60 cloth grid onto the body mesh.
 
     Setup:
-        - 30×30 grid, 1.2m × 1.2m, centered at (0, 1.8, 0) — above shoulders
+        - 60×60 grid, 1.2m × 1.2m, centered at (0, 1.8, 0.15) — above shoulders
+        - Area-weighted inv_mass from cotton density (0.30 kg/m²) — ~0.43 kg total cloth
         - Body mesh: mannequin_physics.glb (pre-processed physics proxy, 1.75m)
-        - 120 frames, 6 substeps, 12 solver iterations (same as sphere_drape)
-        - Cotton compliance: stretch=1e-8, bend=1e-3
+        - 240 frames, 15 substeps, 8 solver iterations
+        - Cotton preset: stretch=1e-7, bend=7.4e-3, damping=0.998, friction=0.35
+        - Air drag: 0.5 (exponential decay per substep)
+        - Collision thickness: 8mm (wider contact zone for shoulder draping)
 
     Validation checks (mirrors sphere_drape.py):
         1. No NaN in final positions
@@ -46,17 +49,21 @@ def run_body_drape(visualize: bool = False, output_path: str = "storage/body_dra
         6. Edge length preservation (mean stretch < 10%)
     """
     print("=== Body Drape Scene (Sprint 2 Layer 3a-Extended) ===")
-    print("Dropping a 30×30 cloth grid onto the body mesh...\n")
+    print("Dropping a 60×60 cloth grid onto the body mesh...\n")
+
+    # --- Fabric preset ---
+    fabric = FABRIC_PRESETS["cotton"]
 
     # --- Configuration ---
     config = SimConfig(
-        total_frames=120,
-        substeps=6,
-        solver_iterations=12,
-        damping=0.98,
-        max_particles=5000,
-        collision_thickness=0.005,    # 5mm — same as sphere_drape
-        friction_coefficient=0.5,
+        total_frames=240,
+        substeps=15,
+        solver_iterations=8,
+        damping=fabric.damping,
+        max_particles=4000,
+        collision_thickness=0.008,    # 8mm — wider contact zone for shoulder draping
+        friction_coefficient=fabric.friction,
+        air_drag=0.5,
     )
 
     # --- Body mesh ---
@@ -69,8 +76,9 @@ def run_body_drape(visualize: bool = False, output_path: str = "storage/body_dra
     print(f"  Body proxy: {collider.spatial_hash.n_triangles} triangles\n")
 
     # --- Cloth mesh ---
-    # 30×30 grid, 1.2m × 1.2m, positioned at Y=1.8m (above shoulders at ~1.45m)
-    grid = generate_grid(width=1.2, height=1.2, cols=30, rows=30, center=(0.0, 1.8, 0.15))
+    # 60×60 grid, 1.2m × 1.2m, positioned at Y=1.8m (above shoulders at ~1.45m)
+    grid = generate_grid(width=1.2, height=1.2, cols=60, rows=60, center=(0.0, 1.8, 0.15))
+    inv_masses = compute_area_weighted_inv_masses(grid.positions, grid.faces, fabric.density)
     print(f"  Cloth particles: {grid.positions.shape[0]}")
     print(f"  Cloth triangles: {grid.faces.shape[0]}")
     print(f"  Cloth edges:     {grid.edges.shape[0]}")
@@ -87,18 +95,31 @@ def run_body_drape(visualize: bool = False, output_path: str = "storage/body_dra
 
     # --- State ---
     state = ParticleState(config)
-    state.load_from_numpy(grid.positions, faces=grid.faces, edges=grid.edges)
+    state.load_from_numpy(grid.positions, faces=grid.faces, edges=grid.edges, inv_masses=inv_masses)
 
     # --- Solver ---
     solver = XPBDSolver(
         constraints=constraints,
-        stretch_compliance=1e-8,   # Cotton: near-inextensible
-        bend_compliance=1e-3,      # Cotton: moderate bending
+        stretch_compliance=fabric.stretch_compliance,
+        bend_compliance=fabric.bend_compliance,
+        max_stretch=fabric.max_stretch,
+        max_compress=fabric.max_compress,
+        stretch_damping=fabric.stretch_damping,
+        bend_damping=fabric.bend_damping,
     )
 
     # --- Engine ---
     engine = SimulationEngine(config, solver=solver)
     engine.collider = collider
+
+    # --- Self-collision ---
+    self_collider = ClothSelfCollider.from_mesh(
+        faces_np=grid.faces,
+        positions_np=grid.positions,
+        thickness=config.self_collision_thickness,
+    )
+    engine.self_collider = self_collider
+    print(f"  Self-collision: cell_size={self_collider.cell_size:.4f}m, thickness={self_collider.thickness:.4f}m")
 
     # --- Run ---
     start_time = time.perf_counter()
@@ -106,7 +127,7 @@ def run_body_drape(visualize: bool = False, output_path: str = "storage/body_dra
         from simulation.scenes.visualizer import visualize_simulation
         visualize_simulation(engine, state, config, body_mesh_path=_BODY_GLB_PATH)
     else:
-        result = engine.run(
+        engine.run(
             state,
             progress_callback=lambda f, t: print(f"\r  Frame {f}/{t}", end="", flush=True),
         )

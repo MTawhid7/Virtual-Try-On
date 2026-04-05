@@ -5,7 +5,7 @@ All simulation parameters in a single dataclass.
 Default values are the "Goldilocks" from Vestra: 6 substeps × 12 iterations.
 """
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 
 
 @dataclass
@@ -23,9 +23,11 @@ class SimConfig:
     damping: float = 0.98            # Velocity damping per substep (0–1)
 
     # --- Collision (from Vestra tuning) ---
-    collision_thickness: float = 0.005   # 5mm push-out margin
-    friction_coefficient: float = 0.3    # Tangential friction
-    max_displacement: float = 0.05       # 5cm per substep — tunneling guard
+    collision_thickness: float = 0.005       # 5mm body push-out margin
+    friction_coefficient: float = 0.3        # Tangential friction (body + self)
+    max_displacement: float = 0.05           # 5cm per substep — tunneling guard
+    air_drag: float = 0.0                    # Exponential velocity drag coefficient per substep (0 = disabled)
+    self_collision_thickness: float = 0.004  # 4mm cloth self-collision push-out
 
     # --- Mesh ---
     max_particles: int = 50_000      # Upper bound for Taichi field allocation

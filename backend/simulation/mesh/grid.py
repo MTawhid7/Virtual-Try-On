@@ -27,6 +27,43 @@ class GridMesh:
     resolution: tuple[int, int]      # (rows, cols) grid dimensions
 
 
+def compute_area_weighted_inv_masses(
+    positions: NDArray[np.float32],
+    faces: NDArray[np.int32],
+    density: float,
+) -> NDArray[np.float32]:
+    """
+    Compute per-vertex inverse masses using the lumped-mass FEM approach.
+
+    Each triangle distributes its area equally to its three vertices (area/3).
+    The vertex mass is then density × vertex_area. This gives physically correct
+    inertia scaling: finer meshes produce lighter particles, not the same 1 kg
+    per particle that uniform inv_mass=1.0 produces.
+
+    Args:
+        positions: (N, 3) vertex positions.
+        faces:     (F, 3) triangle vertex indices.
+        density:   Fabric surface density in kg/m².
+
+    Returns:
+        (N,) array of inverse masses (1/mass per vertex), float32.
+    """
+    n_verts = positions.shape[0]
+    vertex_area = np.zeros(n_verts, dtype=np.float64)
+
+    v0 = positions[faces[:, 0]]
+    v1 = positions[faces[:, 1]]
+    v2 = positions[faces[:, 2]]
+    tri_areas = np.linalg.norm(np.cross(v1 - v0, v2 - v0), axis=1) * 0.5
+
+    np.add.at(vertex_area, faces[:, 0], tri_areas / 3.0)
+    np.add.at(vertex_area, faces[:, 1], tri_areas / 3.0)
+    np.add.at(vertex_area, faces[:, 2], tri_areas / 3.0)
+
+    vertex_area = np.maximum(vertex_area, 1e-12)  # guard against degenerate verts
+    return (1.0 / (density * vertex_area)).astype(np.float32)
+
+
 def generate_grid(
     width: float = 1.0,
     height: float = 1.0,
@@ -96,6 +133,22 @@ def generate_grid(
             a, b = f[i], f[(i + 1) % 3]
             edge = (min(a, b), max(a, b))
             edge_set.add(edge)
+
+    # Add shear (cross-diagonal) edges for in-plane resistance.
+    # Each quad has one diagonal from the triangulation; add the other diagonal
+    # to prevent quads from freely collapsing into parallelograms.
+    for r in range(rows - 1):
+        for c in range(cols - 1):
+            tl = r * cols + c
+            tr = r * cols + (c + 1)
+            bl = (r + 1) * cols + c
+            br = (r + 1) * cols + (c + 1)
+            if (r + c) % 2 == 0:
+                # triangulation uses tl-br diagonal; add cross-diagonal tr-bl
+                edge_set.add((min(tr, bl), max(tr, bl)))
+            else:
+                # triangulation uses tr-bl diagonal; add cross-diagonal tl-br
+                edge_set.add((min(tl, br), max(tl, br)))
 
     edges = np.array(sorted(edge_set), dtype=np.int32)
 

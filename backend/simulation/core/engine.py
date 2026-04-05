@@ -98,8 +98,8 @@ class SimulationEngine:
     def __init__(self, config: SimConfig, solver: SolverStrategy | None = None) -> None:
         self.config = config
         self.solver = solver
-        # Collider will be set in Sprint 2
-        self.collider = None
+        self.collider = None       # Body / sphere collider (set externally)
+        self.self_collider = None  # Cloth self-collider (set externally)
 
     def step_frame(self, state: ParticleState) -> None:
         """Run one full frame of simulation (executes multiple substeps)."""
@@ -110,6 +110,7 @@ class SimulationEngine:
             gravity=config.gravity,
             damping=config.damping,
             max_displacement=config.max_displacement,
+            air_drag=config.air_drag,
         )
 
         for _substep in range(config.substeps):
@@ -120,17 +121,29 @@ class SimulationEngine:
             if self.solver is not None and hasattr(self.solver, 'reset_lambdas'):
                 self.solver.reset_lambdas()
 
-            # 3. Solve constraints (XPBD iterations)
+            # 3. Solve constraints (XPBD iterations, body collision interleaved)
             if self.solver is not None:
                 for _iteration in range(config.solver_iterations):
                     self.solver.step(state, config.substep_dt)
 
-                    # 4. Collision (interleaved inside solver loop)
+                    # Body collision interleaved — static geometry, safe to repeat
                     if self.collider is not None:
                         self.collider.resolve(state, config)
 
+            # 4. Self-collision: one hash rebuild + one kernel dispatch per substep.
+            #    Running inside the iteration loop would amplify each correction 8×
+            #    (stale hash, same penetrations re-detected every iteration → cascade).
+            #    Running once after XPBD convergence avoids that amplification.
+            if self.self_collider is not None:
+                self.self_collider.update_hash(state)
+                self.self_collider.resolve(state)
+
             # 5. Update velocities from position delta + damping
             integrator.update(state)
+
+            # 6. Constraint-based velocity damping (once per substep, after velocity update)
+            if self.solver is not None and hasattr(self.solver, 'apply_damping'):
+                self.solver.apply_damping(state)
 
     def run(self, state: ParticleState, progress_callback=None) -> SimResult:
         """

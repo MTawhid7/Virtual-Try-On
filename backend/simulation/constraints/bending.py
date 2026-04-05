@@ -5,12 +5,23 @@ For each internal edge shared by two triangles (v0, v1, v2, v3), we compute
 the dihedral angle θ between the two triangle normals. The constraint is:
     C(x) = θ - θ₀
 
-where θ₀ is the rest angle (the angle at initialization — typically flat = π
-for a grid mesh).
+where θ₀ is the rest angle (the angle at initialization — typically 0 rad
+for a flat grid mesh, since e × (p2 - p0) and e × (p3 - p0) point the same
+direction when the mesh is planar).
 
-The gradient computation uses the cotangent-based formulation for efficiency:
-each of the 4 vertices gets a gradient contribution based on the triangle
-normals and their areas.
+Gradients are computed analytically using the cotangent-weighted formula
+(Bergou 2006 / Grinspun 2003). For hinge (p0, p1, p2, p3) with shared edge
+e = p1 - p0 and unscaled triangle normals n1 = e × (p2 - p0),
+n2 = e × (p3 - p0):
+
+    ∂θ/∂p2 =  |e| / |n1|² * n1
+    ∂θ/∂p3 = -|e| / |n2|² * n2
+    ∂θ/∂p0 = +dot(p2-p1, e)/(|e||n1|²)*n1  +  dot(p3-p1, e)/(|e||n2|²)*n2
+    ∂θ/∂p1 = -dot(p2-p0, e)/(|e||n1|²)*n1  -  dot(p3-p0, e)/(|e||n2|²)*n2
+
+This replaces the previous finite-difference approximation (24 extra angle
+evaluations per hinge per iteration) with O(1) cross products + dot products,
+eliminating O(eps²) gradient noise and ~8× reducing per-hinge compute cost.
 
 Reference: Bergou et al. "A Quadratic Bending Model for Inextensible Surfaces"
 and the XPBD formulation from Müller et al. 2020.
@@ -156,34 +167,88 @@ class BendingConstraints:
         """Reset Lagrange multipliers at the start of each substep."""
         self.lambdas.fill(0.0)
 
-    @ti.func
-    def _dihedral_angle(
+    @ti.kernel
+    def apply_bend_damping(
         self,
-        p0: ti.math.vec3,
-        p1: ti.math.vec3,
-        p2: ti.math.vec3,
-        p3: ti.math.vec3,
-    ) -> ti.f32:
-        """Compute dihedral angle between two triangles sharing edge (p0, p1)."""
-        edge = p1 - p0
-        n1 = (edge).cross(p2 - p0)
-        n2 = (edge).cross(p3 - p0)
+        positions: ti.template(),
+        velocities: ti.template(),
+        inv_mass: ti.template(),
+        n_hinges: ti.i32,
+        damping_coeff: ti.f32,
+    ):
+        """
+        Damp the angular velocity component of each hinge (Rayleigh-style).
 
-        n1_len = n1.norm()
-        n2_len = n2.norm()
+        Computes the analytical bending gradient ∇θ for each hinge (same formula
+        as the project kernel — Track A), then damps the constraint-velocity
+        component C_dot = ∇θ · v along the gradient direction.
 
-        angle = ti.f32(0.0)
-        if n1_len > 1e-10 and n2_len > 1e-10:
-            n1_hat = n1 / n1_len
-            n2_hat = n2 / n2_len
+        Applied once per substep AFTER integrator.update(), before the next predict.
+        Requires Track A analytical gradients (correct sign convention in place).
+        """
+        for h in range(n_hinges):
+            i0 = self.hinge_v0[h]
+            i1 = self.hinge_v1[h]
+            i2 = self.hinge_v2[h]
+            i3 = self.hinge_v3[h]
 
-            cos_a = ti.math.clamp(n1_hat.dot(n2_hat), -1.0, 1.0)
-            edge_hat = edge / ti.max(edge.norm(), 1e-10)
-            sin_a = n1_hat.cross(n2_hat).dot(edge_hat)
+            p0 = positions[i0]
+            p1 = positions[i1]
+            p2 = positions[i2]
+            p3 = positions[i3]
 
-            angle = ti.atan2(sin_a, cos_a)
+            e  = p1 - p0
+            n1 = e.cross(p2 - p0)
+            n2 = e.cross(p3 - p0)
 
-        return angle
+            len_e  = e.norm()
+            len_n1 = n1.norm()
+            len_n2 = n2.norm()
+
+            if len_e < 1e-8 or len_n1 < 1e-8 or len_n2 < 1e-8:
+                continue
+
+            inv_n1sq  = ti.f32(1.0) / (len_n1 * len_n1)
+            inv_n2sq  = ti.f32(1.0) / (len_n2 * len_n2)
+            inv_len_e = ti.f32(1.0) / len_e
+
+            # Analytical gradient (same convention as project kernel)
+            grad2 = -len_e * inv_n1sq * n1
+            grad3 =  len_e * inv_n2sq * n2
+            grad0 = (-(p2 - p1).dot(e) * inv_n1sq * inv_len_e) * n1 \
+                  + ( (p3 - p1).dot(e) * inv_n2sq * inv_len_e) * n2
+            grad1 = ( (p2 - p0).dot(e) * inv_n1sq * inv_len_e) * n1 \
+                  + (-(p3 - p0).dot(e) * inv_n2sq * inv_len_e) * n2
+
+            w0 = inv_mass[i0]
+            w1 = inv_mass[i1]
+            w2 = inv_mass[i2]
+            w3 = inv_mass[i3]
+
+            # C_dot = ∇θ · v  (rate of dihedral angle change)
+            C_dot = (
+                grad0.dot(velocities[i0])
+                + grad1.dot(velocities[i1])
+                + grad2.dot(velocities[i2])
+                + grad3.dot(velocities[i3])
+            )
+
+            w_grad_sq = (
+                w0 * grad0.norm_sqr()
+                + w1 * grad1.norm_sqr()
+                + w2 * grad2.norm_sqr()
+                + w3 * grad3.norm_sqr()
+            )
+
+            if w_grad_sq < 1e-12:
+                continue
+
+            # Damping impulse: reduce the angular velocity by damping_coeff fraction
+            delta = -damping_coeff * C_dot / w_grad_sq
+            velocities[i0] += w0 * grad0 * delta
+            velocities[i1] += w1 * grad1 * delta
+            velocities[i2] += w2 * grad2 * delta
+            velocities[i3] += w3 * grad3 * delta
 
     @ti.kernel
     def project(
@@ -195,12 +260,18 @@ class BendingConstraints:
         dt: ti.f32,
     ):
         """
-        Project all bending constraints using XPBD.
+        Project all bending constraints using XPBD with analytical gradients.
 
-        Uses a finite-difference gradient approximation for the dihedral angle
-        with respect to the 4 hinge vertices. This is simpler and more robust
-        than the analytical gradient, at the cost of 4 extra angle evaluations
-        per hinge.
+        Uses the closed-form cotangent-weighted gradient of the dihedral angle
+        (Bergou 2006 / Grinspun 2003). For hinge (p0, p1, p2, p3):
+            e  = p1 - p0  (shared edge)
+            n1 = e × (p2 - p0)  (unscaled normal of triangle 1)
+            n2 = e × (p3 - p0)  (unscaled normal of triangle 2)
+
+            ∂θ/∂p2 =  |e| / |n1|² * n1
+            ∂θ/∂p3 = -|e| / |n2|² * n2
+            ∂θ/∂p0 = +dot(p2-p1, e)/(|e||n1|²)*n1 + dot(p3-p1, e)/(|e||n2|²)*n2
+            ∂θ/∂p1 = -dot(p2-p0, e)/(|e||n1|²)*n1 - dot(p3-p0, e)/(|e||n2|²)*n2
 
         XPBD update:
             α̃ = compliance / dt²
@@ -208,7 +279,6 @@ class BendingConstraints:
             Δλ = -(C + α̃·λ) / (Σ wᵢ·|∇Cᵢ|² + α̃)
         """
         alpha_tilde = compliance / (dt * dt)
-        eps = ti.f32(1e-4)  # Finite difference step
 
         for h in range(n_hinges):
             i0 = self.hinge_v0[h]
@@ -221,52 +291,50 @@ class BendingConstraints:
             p2 = positions[i2]
             p3 = positions[i3]
 
-            # Current dihedral angle
-            theta = self._dihedral_angle(p0, p1, p2, p3)
+            e  = p1 - p0                   # shared edge (unscaled)
+            n1 = e.cross(p2 - p0)          # unscaled normal of triangle 1
+            n2 = e.cross(p3 - p0)          # unscaled normal of triangle 2
+
+            len_e  = e.norm()
+            len_n1 = n1.norm()
+            len_n2 = n2.norm()
+
+            if len_e < 1e-8 or len_n1 < 1e-8 or len_n2 < 1e-8:
+                continue
+
+            # Current dihedral angle (atan2 form for full [-π, π] range)
+            n1_hat = n1 / len_n1
+            n2_hat = n2 / len_n2
+            e_hat  = e  / len_e
+            cos_a  = ti.math.clamp(n1_hat.dot(n2_hat), -1.0, 1.0)
+            sin_a  = n1_hat.cross(n2_hat).dot(e_hat)
+            theta  = ti.atan2(sin_a, cos_a)
+
             C = theta - self.rest_angle[h]
+            # Wrap to [-π, π]
+            while C >  ti.math.pi: C -= 2.0 * ti.math.pi
+            while C < -ti.math.pi: C += 2.0 * ti.math.pi
 
-            # Wrap angle difference to [-π, π]
-            while C > ti.math.pi:
-                C -= 2.0 * ti.math.pi
-            while C < -ti.math.pi:
-                C += 2.0 * ti.math.pi
-
-            # Skip small constraint violations
             if ti.abs(C) < 1e-8:
                 continue
 
-            # Compute gradients via finite differences for each vertex
-            # Gradient for vertex i: ∇C_i ≈ (θ(x_i + ε·e_k) - θ(x_i - ε·e_k)) / (2ε)
-            grad0 = ti.math.vec3(0.0)
-            grad1 = ti.math.vec3(0.0)
-            grad2 = ti.math.vec3(0.0)
-            grad3 = ti.math.vec3(0.0)
+            # Analytical cotangent-weighted gradients (Bergou 2006 / Grinspun 2003).
+            # Our convention: n1 = e × (p2-p0), which points OPPOSITE to the paper's
+            # outward normal (p2-p0) × e.  All n1-related terms are therefore negated
+            # relative to the published formula; n2 = e × (p3-p0) is also negated.
+            # This produces grad2 = -|e|/|n1|² n1, grad3 = +|e|/|n2|² n2 and the
+            # corresponding edge-vertex corrections below (verified against FD).
+            inv_n1sq = ti.f32(1.0) / (len_n1 * len_n1)
+            inv_n2sq = ti.f32(1.0) / (len_n2 * len_n2)
+            inv_len_e = ti.f32(1.0) / len_e
 
-            for axis in ti.static(range(3)):
-                delta = ti.math.vec3(0.0)
-                delta[axis] = eps
+            grad2 = -len_e * inv_n1sq * n1
+            grad3 =  len_e * inv_n2sq * n2
+            grad0 = (-(p2 - p1).dot(e) * inv_n1sq * inv_len_e) * n1 \
+                  + ( (p3 - p1).dot(e) * inv_n2sq * inv_len_e) * n2
+            grad1 = ( (p2 - p0).dot(e) * inv_n1sq * inv_len_e) * n1 \
+                  + (-(p3 - p0).dot(e) * inv_n2sq * inv_len_e) * n2
 
-                # Gradient for p0
-                t_plus = self._dihedral_angle(p0 + delta, p1, p2, p3)
-                t_minus = self._dihedral_angle(p0 - delta, p1, p2, p3)
-                grad0[axis] = (t_plus - t_minus) / (2.0 * eps)
-
-                # Gradient for p1
-                t_plus = self._dihedral_angle(p0, p1 + delta, p2, p3)
-                t_minus = self._dihedral_angle(p0, p1 - delta, p2, p3)
-                grad1[axis] = (t_plus - t_minus) / (2.0 * eps)
-
-                # Gradient for p2
-                t_plus = self._dihedral_angle(p0, p1, p2 + delta, p3)
-                t_minus = self._dihedral_angle(p0, p1, p2 - delta, p3)
-                grad2[axis] = (t_plus - t_minus) / (2.0 * eps)
-
-                # Gradient for p3
-                t_plus = self._dihedral_angle(p0, p1, p2, p3 + delta)
-                t_minus = self._dihedral_angle(p0, p1, p2, p3 - delta)
-                grad3[axis] = (t_plus - t_minus) / (2.0 * eps)
-
-            # Weighted gradient norm squared: Σ w_i * |∇C_i|²
             w0 = inv_mass[i0]
             w1 = inv_mass[i1]
             w2 = inv_mass[i2]
@@ -282,12 +350,12 @@ class BendingConstraints:
             if w_grad_sq < 1e-12:
                 continue
 
-            # XPBD update
+            # XPBD Lagrange multiplier update
             denom = w_grad_sq + alpha_tilde
             delta_lambda = -(C + alpha_tilde * self.lambdas[h]) / denom
             self.lambdas[h] += delta_lambda
 
-            # Apply corrections
+            # Apply position corrections
             positions[i0] += w0 * grad0 * delta_lambda
             positions[i1] += w1 * grad1 * delta_lambda
             positions[i2] += w2 * grad2 * delta_lambda

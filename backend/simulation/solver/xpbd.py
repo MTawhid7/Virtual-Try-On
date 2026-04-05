@@ -35,6 +35,10 @@ class XPBDSolver:
         constraints: ConstraintSet,
         stretch_compliance: float = 1e-8,
         bend_compliance: float = 1e-3,
+        max_stretch: float | None = None,
+        max_compress: float | None = None,
+        stretch_damping: float = 0.0,
+        bend_damping: float = 0.0,
     ) -> None:
         """
         Args:
@@ -44,10 +48,24 @@ class XPBDSolver:
                 combined with 10 iterations").
             bend_compliance: XPBD compliance for bending constraints.
                 Higher = more drapey. Controls fold sharpness.
+            max_stretch: Hard upper strain limit as a fraction of rest length
+                (e.g. 0.03 = 3%).  None = disabled.
+            max_compress: Hard lower strain limit as a fraction of rest length
+                (e.g. 0.01 = 1%).  None = disabled.
+            stretch_damping: Constraint-velocity damping along edges (0 = off,
+                1 = critically damped). Applied once per substep after velocity
+                update — damps stretch oscillations without affecting global damping.
+            bend_damping: Constraint-velocity damping along hinge gradient
+                (0 = off, 1 = critically damped). Requires Track A analytical
+                gradients to be in place.
         """
         self.constraints = constraints
         self.stretch_compliance = stretch_compliance
         self.bend_compliance = bend_compliance
+        self._max_stretch = float(max_stretch) if max_stretch is not None else None
+        self._max_compress = float(max_compress) if max_compress is not None else None
+        self._stretch_damping = float(stretch_damping)
+        self._bend_damping = float(bend_damping)
         self._initialized = False
 
     def initialize(self, state: ParticleState, config: SimConfig) -> None:
@@ -64,7 +82,7 @@ class XPBDSolver:
 
     def step(self, state: ParticleState, dt: float) -> None:
         """
-        Perform one solver iteration: project distance → bending constraints.
+        Perform one solver iteration: distance → bending → strain limit.
 
         Called `solver_iterations` times per substep.
         """
@@ -78,7 +96,7 @@ class XPBDSolver:
                 dt,
             )
 
-        # Bending constraints (dihedral angle preservation)
+        # Bending constraints (analytical cotangent gradients)
         if self.constraints.bending is not None:
             self.constraints.bending.project(
                 state.positions,
@@ -86,4 +104,46 @@ class XPBDSolver:
                 self.constraints.bending.n_hinges,
                 self.bend_compliance,
                 dt,
+            )
+
+        # Hard strain limit — clamp edges to [1-max_compress, 1+max_stretch] × L₀
+        if (
+            self.constraints.distance is not None
+            and self._max_stretch is not None
+            and self._max_compress is not None
+        ):
+            self.constraints.distance.apply_strain_limit(
+                state.positions,
+                state.inv_mass,
+                self.constraints.distance.n_edges,
+                self._max_stretch,
+                self._max_compress,
+            )
+
+    def apply_damping(self, state: ParticleState) -> None:
+        """
+        Apply constraint-velocity damping once per substep.
+
+        Called by the engine AFTER integrator.update() has computed fresh
+        velocities from the XPBD position deltas. The damped velocities feed
+        into the next substep's predict step.
+
+        Track D — constraint-based damping (Sprint 2 Fabric Realism).
+        """
+        if self._stretch_damping > 0.0 and self.constraints.distance is not None:
+            self.constraints.distance.apply_stretch_damping(
+                state.positions,
+                state.velocities,
+                state.inv_mass,
+                self.constraints.distance.n_edges,
+                self._stretch_damping,
+            )
+
+        if self._bend_damping > 0.0 and self.constraints.bending is not None:
+            self.constraints.bending.apply_bend_damping(
+                state.positions,
+                state.velocities,
+                state.inv_mass,
+                self.constraints.bending.n_hinges,
+                self._bend_damping,
             )

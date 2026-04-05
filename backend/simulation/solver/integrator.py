@@ -25,17 +25,24 @@ def predict_positions(
     gravity: ti.f32,
     dt: ti.f32,
     max_displacement: ti.f32,
+    air_drag: ti.f32,
 ):
     """
     Semi-implicit Euler: apply gravity to velocity, then predict positions.
 
     - Pinned particles (inv_mass == 0) are not moved.
     - Velocity-clamped to prevent tunneling (from Vestra: max_displacement per substep).
+    - Optional air drag: exponential velocity decay applied before gravity.
     """
     for i in range(n_particles):
         if inv_mass[i] > 0.0:
-            # Apply gravity (Y-axis)
             vel = velocities[i]
+
+            # Air drag — exponential decay per substep (Taichi cloth tutorial pattern).
+            # Applied before gravity so the gravity impulse is not immediately damped.
+            vel = vel * ti.exp(-air_drag * dt)
+
+            # Apply gravity (Y-axis)
             vel[1] += gravity * dt
 
             # Velocity clamping — cap max displacement per substep
@@ -87,11 +94,12 @@ class Integrator:
     """
 
     def __init__(self, dt: float, gravity: float, damping: float,
-                 max_displacement: float) -> None:
+                 max_displacement: float, air_drag: float = 0.0) -> None:
         self.dt = dt
         self.gravity = gravity
         self.damping = damping
         self.max_displacement = max_displacement
+        self.air_drag = air_drag
 
     def predict(self, state: ParticleState) -> None:
         """Apply gravity and predict positions (semi-implicit Euler)."""
@@ -104,6 +112,7 @@ class Integrator:
             self.gravity,
             self.dt,
             self.max_displacement,
+            self.air_drag,
         )
 
     def update(self, state: ParticleState) -> None:

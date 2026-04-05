@@ -93,6 +93,9 @@ python -m pytest tests/integration/ -v
 | **Sprint 1, Layer 3a** | ✅ | Sphere collision (analytical & visualizer implementations) |
 | **Sprint 1, Layer 3b** | ✅ | glTF export — `write_glb()` via trimesh, `SimResult.export_glb()`, CLI `--output` flag |
 | **Sprint 2, Layer 3a-Ext** | ✅ | Body mesh collision — `BodyCollider` (spatial hash + point-triangle). Tuned culling thresholds, fixed mesh alignment, and integrated live Taichi GUI visualizer support. |
+| **Sprint 2, Physics Realism** | ✅ | Shear edges, fabric presets (`materials/presets.py`), resting contact friction, air drag, substep rebalancing (6×12 → 15×2), compliance re-calibration for new substep_dt. |
+| **Sprint 2, Fabric Realism** | ✅ | Area-weighted particle mass (lumped-mass FEM, density from `FabricPreset`), softer cotton bending (`bend_compliance 8e-4→7.4e-3`), reduced damping/friction, grid 40×40→60×60, solver iterations 2→8. Cloth now forms visible folds and conforms to body surface. |
+| **Sprint 2, Algorithm Upgrades** | ✅ | Track A: analytical bending gradients (cotangent-weighted ∂θ/∂p, closes-form Bergou formula). Track B: hard strain limiting per substep (Provot/Müller clamping). Track C: cloth self-collision (dynamic centroid hash, 1-ring exclusion, euclidean penetration gate). Track D: constraint-based velocity damping (stretch + bend modes). Cloth stable; settling damping deferred. |
 | **Sprint 2, Layer 3b-Ext** | ⬜ | Pattern JSON → earcut triangulation, stitch constraints, full garment pipeline |
 | **Sprint 3** | ⬜ | FastAPI backend, Next.js + R3F frontend |
 | **Sprint 4** | ⬜ | Integration, polish, end-to-end testing |
@@ -114,8 +117,13 @@ python -m pytest tests/integration/ -v
 - **XPBD over PD for Phase 1:** Unconditionally stable, faster to first demo, proven in prior work (Vestra). PD upgrade path preserved via `SolverStrategy` Protocol.
 - **Mesh-proxy collision over SDF:** Voxel SDF caused gradient artifacts and upward crumpling. Point-triangle projection with smoothed normals is geometrically accurate and stable.
 - **Interleaved collision:** Collision resolved inside the solver iteration loop (not post-process), preventing the constraint-vs-collision fighting observed in prior work.
-- **No self-collision in Phase 1:** Deferred — both prior engines (Vestra/Vistio) showed this is a separate, complex challenge.
+- **Self-collision: euclidean gate over signed-distance gate.** `best_euclidean < thickness` (not `best_sd < -threshold`) is the correct penetration test. Signed distance alone is fooled by natural cloth folds — a particle 24mm below a fold's face normal has sd = −24mm which exceeds any small threshold, yet it is not penetrating. Euclidean distance to the surface must be within the thickness band for a genuine penetration. Additionally, self-collision runs once per substep after the XPBD iteration loop (not inside it): running it 8× per substep re-applies corrections to stale positions, amplifying each correction 8×.
+- **Self-collision: normal-only correction.** No tangential/friction component in the push-out response. Friction displacement fights distance constraints and causes cascade amplification when accumulated across multiple iterations.
 - **Compliance-based materials:** Fabrics defined by XPBD compliance values, not Young's modulus. Tuned by visual result. Physical parameter mapping deferred to PD upgrade.
+- **Substep count over iteration count:** 15 substeps × 2 iterations outperforms 6 substeps × 12 for cloth-body collision — more frequent collision resolution catches particles earlier in their fall trajectory, reducing lateral drift.
+- **Two-zone contact friction:** Position-based friction is applied both on active penetration (`sd < thickness`) and in the resting contact zone (`euclidean < thickness × 5`). The resting zone prevents cloth from sliding off curved surfaces under gravity without any push-out correction. (Bridson 2002)
+- **Air drag:** Exponential velocity decay (`v *= exp(-drag × dt)`) applied before gravity each substep suppresses high-frequency oscillations and aids settling. Default `0.0` (disabled) for all scenes except `body_drape`.
+- **Area-weighted particle mass:** Per-vertex mass = `density × (sum of adjacent triangle areas / 3)` (lumped-mass FEM). Uniform `inv_mass=1.0` made a 40×40 cotton cloth weigh 1,600 kg instead of 0.43 kg, making gravity-to-constraint ratios 3,700× wrong. Correct mass is critical for natural fold formation — the compliance-based softness only has its intended effect when inertia is physically calibrated.
 
 ## License
 
