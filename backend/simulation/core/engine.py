@@ -121,7 +121,14 @@ class SimulationEngine:
             if self.solver is not None and hasattr(self.solver, 'reset_lambdas'):
                 self.solver.reset_lambdas()
 
-            # 3. Solve constraints (XPBD iterations, body collision interleaved)
+            # 3. Self-collision: one hash rebuild + one kernel dispatch per substep.
+            #    Run BEFORE the iteration loop so that any push-out stretch is
+            #    absorbed and structurally resolved by the distance constraints.
+            if self.self_collider is not None:
+                self.self_collider.update_hash(state)
+                self.self_collider.resolve(state)
+
+            # 4. Solve constraints (XPBD iterations, body collision interleaved)
             if self.solver is not None:
                 for _iteration in range(config.solver_iterations):
                     self.solver.step(state, config.substep_dt)
@@ -129,14 +136,6 @@ class SimulationEngine:
                     # Body collision interleaved — static geometry, safe to repeat
                     if self.collider is not None:
                         self.collider.resolve(state, config)
-
-            # 4. Self-collision: one hash rebuild + one kernel dispatch per substep.
-            #    Running inside the iteration loop would amplify each correction 8×
-            #    (stale hash, same penetrations re-detected every iteration → cascade).
-            #    Running once after XPBD convergence avoids that amplification.
-            if self.self_collider is not None:
-                self.self_collider.update_hash(state)
-                self.self_collider.resolve(state)
 
             # 5. Update velocities from position delta + damping
             integrator.update(state)

@@ -76,7 +76,7 @@ def run_body_drape(visualize: bool = False, output_path: str = "storage/body_dra
     print(f"  Body proxy: {collider.spatial_hash.n_triangles} triangles\n")
 
     # --- Cloth mesh ---
-    # 60×60 grid, 1.2m × 1.2m, positioned at Y=1.8m (above shoulders at ~1.45m)
+    # 60×60 grid, 1.2m × 1.2m, positioned at Y=1.8m (above the 1.75m body)
     grid = generate_grid(width=1.2, height=1.2, cols=60, rows=60, center=(0.0, 1.8, 0.15))
     inv_masses = compute_area_weighted_inv_masses(grid.positions, grid.faces, fabric.density)
     print(f"  Cloth particles: {grid.positions.shape[0]}")

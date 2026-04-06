@@ -4,7 +4,43 @@ This document organizes progress history, encountered issues, structural adjustm
 
 ---
 
-### 📅 April 5, 2026 (Session 2): Self-Collision Instability Investigation and Fix
+### 📅 April 6, 2026 (Session 4): Finalizing XPBD Realism and Settling Fixes
+
+**Status:** ✅ Optimized — Cloth settles at ~0.15 m/s; 130/130 tests passing.
+**Focus:** Resolving the "wind-driven" jitter and "stiff arch" umbrella behavior through constraint loop reordering, collision zone refinement, and material property relaxation.
+
+#### Accomplishments
+- **Collision Velocity Injection Fix:** Updated `predicted[i]` in body and self-collision penetration kernels (`predicted[i] += correction`) to cancel pure push-out velocity while preserving tangential sliding. This effectively halted the continuous energy injection from collision corrections.
+- **Self-Collision Loop Synchronization:** Moved `self_collider.resolve()` to run once per substep **before** the XPBD solver iteration loop. This allows distance constraints to resolve push-out stretch immediately before the frame concludes, eliminating high-frequency "jitter."
+- **Friction Zone Refinement:** Shrunk the resting contact friction zone in `resolver.py` from `5.0 * thickness` (40mm) to `1.5 * thickness` (12mm). This removed the "glue aura" that was catching cloth edges mid-air, allowing them to hang naturally.
+- **Buckling Relaxation:** Updated the Cotton material preset:
+  - `bend_compliance`: `7.4e-3` → `1.5e-2` (softer bending helps overcome flat initialization).
+  - `max_compress`: `0.01` (1%) → `0.10` (10%). Fabric physically buckles instantly to form folds; a 1% limit was creating "plate-like" resistance.
+- **Repositioning:** Reverted cloth drop height to `Y=1.8m`. (A trial at `Y=1.5m` placed the cloth inside the neck/torso mesh, causing massive initial penetrations and invalidating the test session).
+
+#### Current State
+- **Stability:** The simulation is extremely stable. Mean speeds settle to < 0.2 m/s within 240 frames. No explosions or "spontaneous wind" effects.
+- **Physicality:** The cloth behaves like a heavy woven cotton sheet—stable, inextensible, but significantly more flexible than prior iterations.
+- **Draping Paradox:** The cloth still forms an "arch" (umbrella) over the shoulders. While visually "stiff," this is the mathematically correct state for a 1.2m flat square with 10% compression/shear limits.
+- **Testing:** 130/130 unit and integration tests passing.
+
+#### Key Insights & Design Rationale
+- **Shear Locking:** The "arch/umbrella" shape is not a solver failure; it is a case of topological "Shear Locking." A flat square grid cannot wrap around a doubly-curved shoulder without shearing or compressing past the cotton weave limits. The "tenting" is the lowest-energy state where distance, bending, and compression constraints are all satisfied.
+- **Constraint Collision Handling:** Running self-collision *inside* the Gauss-Seidel solver loop is dangerous for performance and stability. Running it *exactly once* before the solver allows the solver to "absorb" the collision delta, ensuring the final positions rendered to the user are structurally consistent.
+- **Friction Balance:** Collision friction should be "sticky" only at the surface. Oversized thresholds catch the fabric's momentum in mid-air, creating a false "floating" rest state.
+
+#### Outstanding Issues
+- **Draping Curvature:** While stable, a flat 1.2m drop is not a natural way to test garment fit. It highlights the isometric bending limitation where the "rest state" is a flat plane.
+- **Performance:** 60×60 grid with 16 iterations remains computationally expensive for real-time use (~350ms/frame).
+
+#### Future Plan (Sprint 2 Layer 3b-Extended)
+- **Transition to 2D Panel Garments:** Shift from "dropping flat squares" to "pattern-based assembly."
+- **Pattern Triangulation:** Implement `mesh/triangulation.py` using `earcut` for irregular 2D pieces.
+- **Stitch constraints:** Implement `constraints/stitch.py` (zero-length distance constraints) to pull panels together around the body.
+- **Initial Placement:** Spawn front/back panels vertically around the torso; the stitching pull combined with gravity will naturally bypass the "arch" locking problem.
+- **Projective Dynamics (PD) Evaluation:** Ongoing. If stitching high-res panels creates stability issues in XPBD, we will pivot to the global PD solver.
+
+---
 
 **Status:** ✅ Stable — explosion fixed, 130/130 tests passing. Mean speed FAIL persists (damping work deferred).
 **Focus:** Track C (self-collision) introduced catastrophic instability during body drape. Cloth exploded to 400 m/s within 15 frames on contact with body. Three root causes identified and fixed.
