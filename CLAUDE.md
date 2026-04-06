@@ -107,7 +107,7 @@ SimConfig → ParticleState (Taichi fields)
 
 ## Current State
 
-Sprint 1 complete. Sprint 2 complete through "Algorithm Upgrades" (Tracks A–D):
+Sprint 1 complete. Sprint 2 complete through "Algorithm Upgrades" (Tracks A–D) + cloth settling fix:
 - **Layer 3a-Extended:** `BodyCollider` with `StaticSpatialHash`, `resolve_body_collision` kernel, `body_drape` scene, `scripts/process_body.py` pipeline.
 - **Physics Realism:** Shear edges in `mesh/grid.py`, `materials/presets.py` with 5 fabric presets, `air_drag` in `SimConfig` + `Integrator`, substep rebalancing (6×12 → 15×2 for `body_drape`), two-zone contact friction.
 - **Fabric Realism:** Area-weighted mass via `compute_area_weighted_inv_masses()`, cotton re-calibrated, `body_drape` grid upgraded to 60×60 × 8 iterations. Cloth forms visible folds and conforms to body surface.
@@ -115,6 +115,8 @@ Sprint 1 complete. Sprint 2 complete through "Algorithm Upgrades" (Tracks A–D)
 - **Track B — Strain limiting:** `apply_strain_limit` kernel in `constraints/distance.py` clamps edges to [L₀×(1−max_compress), L₀×(1+max_stretch)] per substep. `max_stretch`/`max_compress` fields added to `FabricPreset` and `XPBDSolver`.
 - **Track C — Self-collision:** `collision/self_collider.py` + `collision/self_resolver.py`. `ClothSelfCollider` rebuilds a dynamic hash once per substep via `update_hash()` (centroid-based, vectorised numpy argsort), then `resolve()` runs the kernel once per substep AFTER the XPBD iteration loop (not inside it). 1-ring exclusion via vertex equality in kernel. Penetration gate: `best_euclidean < thickness` — particle must be within the 4mm band, not just on the wrong signed-distance side (natural folds produce sd<0 at large euclidean distance and must not trigger). Normal-only correction; no tangential friction. `self_collision_thickness=0.004` added to `SimConfig`.
 - **Track D — Constraint damping:** `apply_stretch_damping` / `apply_bend_damping` Taichi kernels in distance/bending constraints. Applied once per substep after `integrator.update()` via `solver.apply_damping(state)`. `stretch_damping` / `bend_damping` fields added to `FabricPreset` and `XPBDSolver`.
+- **Collision velocity injection fix:** `resolve_body_collision` (`resolver.py`) now writes `predicted[i] = predicted[i] + d_normal` after the penetration push-out (cancels normal injection, preserves tangential sliding). The resting contact block does NOT update `predicted` — doing so froze all particles within 40mm of the body and caused cloth to arch. `resolve_self_collision` (`self_resolver.py`) writes `predicted[i] = predicted[i] + correction` (cancels only the push-out vector; `predicted` added as kernel parameter). Cotton: `damping=0.998 → 0.990`. `body_drape` `solver_iterations=8 → 16`. Mean speed: 1.39 m/s → 0.22 m/s (PASS).
+- **Known open issue — arch drape shape:** After the velocity injection fix, the cloth settles but forms an arch/umbrella over the body rather than draping naturally. Root causes: (1) flat initial placement causes cloth to land on head as a flat sheet; (2) isometric bending penalises deviation from flat rest angle; (3) friction=0.35 holds cloth in arch position once head-contact is established. Fix candidates documented in `docs/worklog.md` (Session 3 continued). Not yet resolved.
 
 Sprint 2 remaining (Layer 3b-Extended): pattern JSON → earcut triangulation, stitch constraints, full garment pipeline. Files not yet created: `constraints/stitch.py`, `mesh/triangulation.py`, `mesh/panel_builder.py`, `mesh/placement.py`.
 

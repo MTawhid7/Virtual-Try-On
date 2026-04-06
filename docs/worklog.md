@@ -96,7 +96,54 @@ Cloth is stable, drapes onto the body, and passes all geometric checks. The spee
 2. Body collision resting-contact friction (position-based) similarly re-injects velocity when particles settle near the surface.
 3. `stretch_damping=0.20` and `bend_damping=0.10` (cotton preset) may be too low to converge within 240 frames at 15 substeps.
 
-**Decision:** Deferred. The cloth is physically correct in shape and stable. The settling behavior requires damping calibration that is better addressed alongside Sprint 2 Layer 3b (garment pipeline), when the full draping target can be evaluated end-to-end.
+**Decision:** Deferred at end of Session 2. Fixed in Session 3 (April 6, 2026) — see below.
+
+---
+
+### 📅 April 6, 2026 (Session 3): Fix Cloth Settling — Collision Velocity Injection
+
+**Status:** ✅ Fixed — 130/130 tests passing.
+
+#### Root Cause
+
+`update_velocities` computes `velocity = (positions - predicted) / dt`. The `predicted` field is set once at substep start; all subsequent modifications to `positions` — by XPBD constraints AND by collision kernels — contribute to velocity. A 5mm body collision push with `dt_sub = 0.00111s` injected ~4.5 m/s per occurrence. Over 8 iterations × 15 substeps/frame, this continuously overwhelmed damping, preventing the cloth from settling.
+
+#### Fixes Applied
+
+**1. Body collision velocity injection (`collision/resolver.py`)**
+After each `positions[i] = ...` write in the penetration block and resting contact block, added:
+```python
+predicted[i] = positions[i]  # cancel velocity injection from collision push
+```
+`predicted` was already in the kernel signature. No call-site changes needed.
+
+**2. Self-collision velocity injection (`collision/self_resolver.py` + `self_collider.py`)**
+Added `predicted: ti.template()` parameter to `resolve_self_collision`. After the position correction:
+```python
+predicted[i] = positions[i]  # cancel velocity injection from self-collision push
+```
+Updated `ClothSelfCollider.resolve()` call to pass `state.predicted`.
+
+**3. Damping recalibration (`materials/presets.py`)**
+Cotton preset: `damping=0.998 → 0.990`, `stretch_damping=0.20 → 0.40`, `bend_damping=0.10 → 0.20`.
+
+**4. Solver iterations (`scenes/body_drape.py`)**
+`solver_iterations=8 → 16`. Reduces residual oscillation from under-converged constraints at this particle count.
+
+#### Result (Iteration 1 — Partial Fix)
+All 130 tests pass. Mean speed: 0.2248 m/s (PASS). However, the cloth froze into an arch/umbrella shape instead of draping naturally. Two new problems introduced:
+1. **Resting contact block**: `predicted[i] = positions[i]` zeros ALL velocity for particles within `thickness * 5.0 = 40mm` of the body. This is a huge zone — any particle near the body was frozen in place, creating the arch shape.
+2. **Bend/stretch damping too high**: `bend_damping=0.20` resisted natural folding dynamics; `stretch_damping=0.40` prevented surface sliding.
+
+#### Iteration 2 Correction (same session)
+
+**Problem 1 — Resting contact block**: REMOVED the `predicted[i] = positions[i]` line from the resting contact block. The position-based friction there already produces velocity-level friction through `update_velocities`; no additional predicted update needed.
+
+**Problem 2 — Penetration block**: Changed `predicted[i] = positions[i]` to `predicted[i] = predicted[i] + d_normal`. This cancels only the normal velocity injection (inelastic collision in normal direction) while preserving tangential velocity (cloth slides along surface). Formula: `velocity_after = d_tangential*(1-friction)/dt` — correct sliding response.
+
+**Problem 3 — Self-collision**: Changed `predicted[i] = positions[i]` to `predicted[i] = predicted[i] + correction` where `correction = (thickness-best_sd)*best_normal`. Cancels only the push-out velocity; preserves pre-collision motion.
+
+**Problem 4 — Damping**: Reverted `bend_damping: 0.20 → 0.10` and `stretch_damping: 0.40 → 0.20`. The higher values were preventing natural folding. `damping=0.990` kept.
 
 #### Collateral Fix: Stale 40×40 Print Strings
 
@@ -111,11 +158,138 @@ Cloth is stable, drapes onto the body, and passes all geometric checks. The spee
 | `core/engine.py` | `update_hash()` once per substep before loop; `resolve()` once per substep after loop |
 | `scenes/body_drape.py` | Fixed stale "40×40" references |
 
-#### Future Plans
+#### Final State After Session 3
 
-- **Damping calibration:** Increase `stretch_damping` and `bend_damping` for cotton, or add a global energy drain mechanism. Target: mean speed < 0.5 m/s by frame 240.
-- **Settling verification:** Add a mean speed convergence check to the integration test with a higher threshold (2.0 m/s) until damping is solved, then tighten.
-- **Sprint 2 Layer 3b:** Pattern JSON → earcut triangulation → stitch constraints → full garment pipeline. Files not yet created: `constraints/stitch.py`, `mesh/triangulation.py`, `mesh/panel_builder.py`, `mesh/placement.py`.
+The cloth now **settles** (mean speed 0.2248 m/s — PASS) but still **does not drape naturally**. The exported GLB and live visualizer show:
+- Cloth forms an arch/umbrella shape over the body rather than conforming
+- The cloth center rests on the head/shoulders but edges do not hang down
+- After settling, the shape is geometrically frozen in an unrealistic dome
+
+All 130 tests pass. The velocity injection fix is architecturally correct. The draping failure is a separate problem not yet resolved.
+
+---
+
+### 📅 April 6, 2026 (Session 3 — Continued): Draping Investigation and Current Understanding
+
+**Status:** 🔶 Partially fixed — settling works, draping does not.
+
+#### Problem Statement
+
+After the collision velocity injection fix, the cloth settles to a low mean speed (0.2248 m/s) but does not conform to the body. It forms an arch/umbrella shape, with the center resting on the head and edges curving outward but not hanging down. This is structurally different from the reference behavior (cloth draping over a sphere/body with edges hanging under gravity, reaching a natural resting state).
+
+The test suite does not catch this — mean speed, penetration, and stretch checks all pass. The visual output is wrong.
+
+#### What Was Tried in Session 3
+
+**Attempt 1: Velocity injection fix — correct diagnosis, partially wrong implementation**
+
+The root cause was correctly identified: `update_velocities` computes `v = (positions - predicted) / dt`, and collision corrections modify `positions[i]` without updating `predicted[i]`, injecting velocity with each push. The fix was:
+
+- Body collision (penetration block): `predicted[i] = positions[i]` — zeros ALL velocity including tangential
+- Body collision (resting contact block): `predicted[i] = positions[i]` — zeros ALL velocity for ANY particle within `thickness × 5 = 40mm` of the body
+- Self-collision: `predicted[i] = positions[i]` — zeros all velocity on push-out
+- Cotton damping: `damping=0.998 → 0.990`, `stretch_damping=0.20 → 0.40`, `bend_damping=0.10 → 0.20`
+- Body drape iterations: `8 → 16`
+
+Result: Mean speed 0.2248 m/s (PASS). But cloth arched and froze. The 40mm resting-contact zero-velocity zone froze particles near the body into an arch shape. Higher bend_damping prevented folding recovery.
+
+**Attempt 2: Refined velocity injection fix**
+
+Revised the fix to be more targeted:
+- Penetration block: `predicted[i] = predicted[i] + d_normal` — cancels only the normal injection, preserves tangential sliding velocity
+- Resting contact block: removed `predicted[i]` update entirely — position-based friction already produces correct velocity-level effect
+- Self-collision: `predicted[i] = predicted[i] + correction` — cancels only the push-out delta
+- Reverted `bend_damping: 0.20 → 0.10` and `stretch_damping: 0.40 → 0.20`
+
+Result: All 130 tests still pass. But the visual output remains an arch/umbrella shape. The cloth is still not draping naturally.
+
+#### Current Understanding of Why the Arch Persists
+
+The arch is not caused by velocity injection (that is now fixed). It is a **draping geometry problem**: the cloth starts as a flat 1.2×1.2m sheet at Y=1.8m and falls onto a body that is 1.75m tall. The head/shoulders are at ~Y=1.55–1.65m. The cloth falls ~0.2–0.25m before contacting the body.
+
+**Key constraint on draping geometry:**
+- The cloth is 1.2m × 1.2m = 1.44 m² total area
+- The body cross-section at head/shoulder height spans roughly 0.45m wide × 0.3m deep
+- To wrap the cloth from the head down to the shoulders and around the torso, it needs to simultaneously fold in two axes
+- With a flat initial placement, the cloth has zero bending deformation at t=0. The bending rest angles are all zero (flat). When the cloth starts to fold, bending constraints resist any deviation from flat
+
+**The arch geometry is actually the low-energy equilibrium for the current setup:** gravity pulls edges down, but bending constraints resist folding from flat. The arch shape is where these forces balance. The cloth CAN fold (bending compliance is soft at α̃≈6000), but:
+1. The cloth must travel a large angular distance from flat to a hang angle of ~90–120°
+2. With 15 substeps × 16 iterations × 240 frames, there may be sufficient time to fold, but the resting contact friction at friction=0.35 prevents the cloth from sliding across the body to reposition
+3. The head area acts as a pivot: cloth is pinned there by friction and collision, edges swing out to equilibrium rather than hanging straight down
+
+**Additional factor — bending rest angle:** XPBD bending uses the INITIAL dihedral angles as rest angles (isometric bending). The initial cloth is flat → rest angles are all π (flat). The bending constraint resists folding BELOW the equilibrium arc shape. This means the cloth wants to remain flat; it will only fold as much as gravity overcomes bending stiffness.
+
+**Factor — friction coefficient:** `friction=0.35` is relatively high. Particles in contact with the head/shoulders are significantly held in place. Since the cloth center is resting on the head, the frictional force is strong enough to prevent the cloth from sliding off to the side to drape naturally around the body.
+
+#### Root Cause Assessment
+
+The primary reasons the cloth arches rather than drapes:
+
+1. **Initial placement and cloth size:** The cloth starts above the head, not placed around the torso. It falls and lands on the head/shoulders as a flat sheet, then tries to fold. A cloth thrown onto a head will naturally form an umbrella shape unless it is large enough and/or placed in a way that lets gravity overcome bending stiffness uniformly.
+
+2. **Bending rest angle is flat (π):** The isometric XPBD bending constraint penalizes any deviation from the flat rest shape. The cloth needs a strong enough gravity:stiffness ratio to overcome this and fold naturally. With cotton at α̃≈6000 and current mass calibration, the stiffness may be dominating at the edges.
+
+3. **Friction holds the cloth in the arch:** Once the center rests on the head with friction=0.35, the cloth is largely held in place and doesn't redistribute.
+
+4. **Self-collision on the arch:** The two sides of the cloth that fold under the arch may be self-colliding with each other, pushing them outward and maintaining the arch shape.
+
+#### What Would Fix the Draping
+
+The following changes are hypothesized to improve draping (NOT implemented yet — deferred to next session):
+
+**Option A — Change initial placement:** Place the cloth not above the head but at shoulder height and slightly offset outward, so it falls alongside the body rather than on top. This would produce a side-drape or wrap rather than the current top-drop.
+
+**Option B — Increase bend_compliance (softer bending):** Raise `bend_compliance=7.4e-3` to `1e-2` or `2e-2`. With softer bending, the cloth more readily folds away from the flat rest shape. Trade-off: cotton becomes more silk-like.
+
+**Option C — Reduce friction:** Lower `friction=0.35` to `0.15–0.20`. Less friction allows the cloth to slide across the body and redistribute, producing a more natural drape. Trade-off: cloth may slide off entirely.
+
+**Option D — Change cloth dimensions:** Use a narrower but longer cloth (e.g., 0.8m × 1.6m) that is more likely to hang naturally when it falls over the body.
+
+**Option E — Pre-bent initial shape:** Instead of a flat initial placement, position the cloth in a V-shape or arc that approximates the draped rest state, then simulate. This eliminates the large folding distance the cloth must travel from flat.
+
+**Option F — Two-step simulation:** First simulate the cloth falling to shoulder level and stopping (gravity + collision, no bending). Then re-enable bending and let it settle. This bypasses the bending resistance during the falling phase.
+
+**Option G — Longer simulation:** Increase `total_frames` from 240 to 480–720. More time for gravity to overcome bending stiffness and fold the cloth fully.
+
+#### Architecture Status
+
+The velocity injection fix is architecturally correct and should remain in place:
+- `resolver.py`: `predicted[i] = predicted[i] + d_normal` (penetration)
+- `resolver.py`: No predicted update in resting contact block
+- `self_resolver.py`: `predicted[i] = predicted[i] + correction`
+
+These changes are stable (130/130 tests), do not cause explosions, and correctly prevent collision push-outs from injecting spurious velocity.
+
+#### Files Changed in Session 3
+
+| File | Change |
+|------|--------|
+| `collision/resolver.py` | Penetration block: `predicted[i] = predicted[i] + d_normal` (normal-only injection cancel). Resting contact: no predicted update. |
+| `collision/self_resolver.py` | Added `predicted: ti.template()` param; `predicted[i] = predicted[i] + correction` |
+| `collision/self_collider.py` | Pass `state.predicted` to `resolve_self_collision` |
+| `materials/presets.py` | Cotton: `damping=0.998 → 0.990` (settled); `stretch_damping`, `bend_damping` reverted to 0.20/0.10 after testing showed higher values prevented draping |
+| `scenes/body_drape.py` | `solver_iterations=8 → 16` |
+
+#### Known Open Issues After Session 3
+
+1. **Arch/umbrella drape shape** — cloth does not hang naturally. Root causes identified above; fix options documented. Not yet implemented.
+2. **Mean speed test threshold** — the body_drape integration test currently checks `mean_speed < 1.0 m/s`. The cloth now passes at 0.22 m/s but the shape is wrong. A shape-quality metric (e.g., max height of edge particles relative to body surface height) would be a more meaningful test.
+3. **Sprint 2 Layer 3b** — pattern JSON → earcut triangulation → stitch constraints → full garment pipeline. Files not yet created: `constraints/stitch.py`, `mesh/triangulation.py`, `mesh/panel_builder.py`, `mesh/placement.py`.
+
+#### Recommended Next Steps (Priority Order)
+
+1. **Try Option A (placement change) + Option G (longer simulation):** These are low-risk, no-architecture-change interventions. Move the initial cloth center from (0, 1.8, 0.15) to (0, 1.5, 0.0) and increase frames to 480. Observe if gravity can produce natural draping from a lower starting position.
+
+2. **Try Option B (softer bending):** Raise `bend_compliance` from `7.4e-3` to `2e-2`. Run body_drape and compare the fold geometry. If edges hang more naturally, calibrate a value between that produces cotton-like behavior.
+
+3. **Try Option C (lower friction):** After placement and bending fixes, if cloth still doesn't slide to conform, lower `friction=0.35` to `0.20`.
+
+4. **If all else fails — Option E (pre-bent placement) or Option F (two-step):** These require more engineering but guarantee correct final shape.
+
+5. **Sprint 2 Layer 3b:** Once body_drape produces convincing draping, proceed to the full garment pipeline. The stitch constraint and panel builder are independent of the draping quality.
+
+**Do NOT proceed to Sprint 3 (web layer) until the single-panel draping problem is visually acceptable.**
 
 ---
 

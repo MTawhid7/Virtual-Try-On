@@ -194,6 +194,10 @@ def resolve_body_collision(
             d_normal = disp.dot(best_normal) * best_normal
             d_tangential = disp - d_normal
             positions[i] = predicted[i] + d_normal + d_tangential * (1.0 - friction)
+            # Cancel only the normal velocity injection (inelastic collision in normal dir).
+            # Preserve tangential velocity so cloth can slide along the body surface.
+            # velocity = (positions[i] - predicted_new) / dt = d_tangential*(1-friction)/dt
+            predicted[i] = predicted[i] + d_normal
 
         # Resting contact friction: particle is in the contact zone but NOT penetrating.
         # Using elif guarantees mutual exclusion with the penetration block above —
@@ -206,3 +210,7 @@ def resolve_body_collision(
             d_normal_rest = curr_disp.dot(best_normal) * best_normal
             d_tang_rest = curr_disp - d_normal_rest
             positions[i] = predicted[i] + d_normal_rest + d_tang_rest * (1.0 - friction)
+            # Do NOT update predicted here: the friction-reduced position delta becomes
+            # velocity naturally via update_velocities. Setting predicted[i]=positions[i]
+            # would zero ALL velocity for every particle within 5×thickness of the body,
+            # freezing the cloth and preventing natural draping along the surface.

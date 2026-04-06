@@ -58,7 +58,7 @@ def run_body_drape(visualize: bool = False, output_path: str = "storage/body_dra
     config = SimConfig(
         total_frames=240,
         substeps=15,
-        solver_iterations=8,
+        solver_iterations=16,
         damping=fabric.damping,
         max_particles=4000,
         collision_thickness=0.008,    # 8mm — wider contact zone for shoulder draping

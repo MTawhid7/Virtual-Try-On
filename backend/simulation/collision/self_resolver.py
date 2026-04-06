@@ -28,6 +28,7 @@ _P3 = 83492791
 @ti.kernel
 def resolve_self_collision(
     positions: ti.template(),
+    predicted: ti.template(),
     inv_mass: ti.template(),
     n_particles: ti.i32,
     faces: ti.template(),
@@ -157,4 +158,8 @@ def resolve_self_collision(
         # `thickness - best_sd` where sd ∈ (-thickness, 0) → correction ∈ (thickness, 2×thickness).
         # Max 8 mm per substep — well within constraint restore range.
         if found == 1 and best_euclidean < thickness and best_sd < 0.0:
-            positions[i] = positions[i] + (thickness - best_sd) * best_normal
+            correction = (thickness - best_sd) * best_normal
+            positions[i] = positions[i] + correction
+            # Cancel only the push-out velocity contribution; preserve pre-collision motion.
+            # velocity = (positions_after - predicted_new) / dt = (positions_before - predicted) / dt
+            predicted[i] = predicted[i] + correction

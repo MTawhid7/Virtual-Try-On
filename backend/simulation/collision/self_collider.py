@@ -177,6 +177,7 @@ class ClothSelfCollider:
         """
         resolve_self_collision(
             state.positions,
+            state.predicted,
             state.inv_mass,
             state.n_particles,
             self.faces_field,
