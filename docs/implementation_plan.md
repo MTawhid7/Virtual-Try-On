@@ -467,43 +467,88 @@ python -m simulation --scene sphere_drape
 | **Test: point-triangle** | `tests/test_point_triangle.py` | Test projection for interior point, edge-clamped, vertex-clamped cases. Verify barycentric coords sum to 1. |
 | **Test: body drape** | `tests/test_integration.py::test_body_drape` | Drop 30×30 grid onto body mesh. Verify: no penetration, cloth rests on shoulders/chest. |
 
-#### Layer 3b-extended: Garment Construction (Days 5–8)
+#### Layer 3b-extended: Garment Construction — Phased Plan
+
+> **Why panels, not flat sheets:** The arch/umbrella shape from `body_drape` is inherent — a flat sheet cannot wrap a doubly-curved shoulder without shearing past strain limits. The fix is to spawn panels *vertically* around the torso (already at the correct depth) and stitch them; gravity + stitch forces produce natural draping without the arch. This is how CLO3D works.
+
+> **GarmentCode decision:** Do not use. GarmentCode targets Maya/Qualoth with heavy research dependencies. Our simple pattern JSON format (below) is purpose-built for XPBD/Taichi and sufficient for MVP.
+
+> **Key insights from Sprint 2 testing:**
+> - Collision velocity injection (`predicted[i] += correction`, not `= positions[i]`) is critical — zeroing all velocity in the resting contact zone (40mm) freezes cloth into arch shapes.
+> - Friction zone should be narrow (`1.5×thickness` ≈ 12mm, not `5×thickness` ≈ 40mm) to avoid "glue aura."
+> - `max_compress=0.10` (10%) is needed — 1% plate-like resistance prevents natural buckling into folds.
+
+##### Pattern JSON Format
+
+```json
+{
+  "name": "TankTop",
+  "panels": [
+    { "id": "front", "vertices_2d": [[0,0],[0.4,0],[0.4,0.7],[0,0.7]],
+      "placement": { "position": [0.0, 1.0, 0.12], "rotation_y_deg": 0 } },
+    { "id": "back", "vertices_2d": [[0,0],[0.4,0],[0.4,0.7],[0,0.7]],
+      "placement": { "position": [0.0, 1.0, -0.12], "rotation_y_deg": 180 } }
+  ],
+  "stitches": [
+    { "panel_a": "front", "edge_a": [0,3], "panel_b": "back", "edge_b": [0,3] },
+    { "panel_a": "front", "edge_a": [1,2], "panel_b": "back", "edge_b": [1,2] }
+  ],
+  "fabric": "cotton"
+}
+```
+
+##### Phase 1: Triangulation
 
 | Task | File(s) | Details |
 |---|---|---|
-| Earcut triangulation | `simulation/mesh/triangulation.py` | `triangulate_polygon(vertices_2d) → triangles` via `mapbox-earcut`. Handles convex + concave polygons. |
-| Panel builder | `simulation/mesh/panel_builder.py` | `build_panels(pattern_json) → list[Panel]`. Each Panel has: positions_3d, triangles, edges, edge_vertex_map |
-| Panel placement | `simulation/mesh/placement.py` | Apply 3D position + rotation from pattern JSON to transform 2D panel vertices into world space around the body |
-| Stitch constraint | `simulation/constraints/stitch.py` | `build_stitch_constraints(panels, stitch_defs) → pairs`. Match vertices along stitched edges. Zero rest length, configurable compliance. |
-| Merge panels → state | `simulation/mesh/panel_builder.py` | Combine all panels into single ParticleState with global vertex/face indices. Track panel boundaries for UVs. |
-| Fabric presets | `simulation/materials/presets.py` | 5 presets (cotton, silk, denim, jersey, chiffon) → compliance values |
-| T-shirt pattern | `data/patterns/tshirt.json` | Front bodice + back bodice + 2 sleeves. Manual annotation. |
-| Skirt pattern | `data/patterns/skirt.json` | Front + back panels. Simpler geometry. |
-| **Test: triangulation** | `tests/test_triangulation.py` | Triangulate known polygons. Verify: all points covered, no degenerate triangles, correct triangle count. |
-| **Test: stitch pairs** | `tests/test_constraints.py::test_stitch` | Two square panels with matching edges. Verify: correct vertex pairs generated, gap closes after solving. |
+| Grid-clip triangulation | `simulation/mesh/triangulation.py` | `triangulate_panel(vertices_2d, resolution=20) → TriangulatedPanel`. Grid-clip approach: generate NxN grid in bounding box, keep interior points (point-in-polygon), add boundary vertices, earcut-triangulate. Extract structural + shear edges. Normalize UVs to [0,1]². |
+| **Test: triangulation** | `tests/unit/mesh/test_triangulation.py` | Rectangle and trapezoid: all UVs in [0,1], no degenerate triangles, no vertices outside polygon. |
 
-#### Full Integration (Days 9–10)
+##### Phase 2: Stitch Constraints
 
 | Task | File(s) | Details |
 |---|---|---|
-| Engine: pattern mode | `simulation/core/engine.py` | `SimulationEngine.run_garment(pattern_path, fabric_name, body_path)` — full pipeline |
-| CLI: garment mode | `simulation/__main__.py` | `python -m simulation --pattern tshirt --fabric cotton` |
-| **Test: T-shirt drape** | `tests/test_integration.py::test_tshirt` | Full pipeline. Verify: no NaN, no body penetration, stitch gaps < 5mm, energy decays |
+| Stitch constraint kernel | `simulation/constraints/stitch.py` | `StitchConstraints`: XPBD zero-rest-length distance constraint. Taichi kernel. **No `from __future__ import annotations`** (`.template()` rule). Compliance `1e-6`. |
+| Wire into solver | `constraints/__init__.py`, `solver/xpbd.py` | Uncomment `stitch` field in `ConstraintSet`. Add `stitch_pairs` param to `build_constraints()`. Add `stitch.project()` call in `XPBDSolver.step()` after bending. |
+| **Test: stitch** | `tests/unit/constraints/test_stitch.py` | Two particles 1m apart → gap < 0.01m after 50 iters. Zero gap → no NaN. |
+
+##### Phase 3: Panel Builder
+
+| Task | File(s) | Details |
+|---|---|---|
+| Multi-panel merger | `simulation/mesh/panel_builder.py` | `build_garment_mesh(pattern_path, resolution=20) → GarmentMesh`. Loads JSON, triangulates each panel, applies placement transform (lift 2D→3D, rotate Y, translate), merges into single position/face/edge arrays with global indices, resolves stitch vertex pairs (sort-and-zip along edge). |
+| **Test: panel builder** | `tests/unit/mesh/test_panel_builder.py` | 2-panel rectangle: merged vertex count = 2×panel, stitch pairs reference valid indices. |
+
+##### Phase 4: First Garment Scene
+
+| Task | File(s) | Details |
+|---|---|---|
+| Tank top pattern | `data/patterns/tank_top.json` | Front + back rectangular panels (0.4×0.7m), side stitches only. Placement: front Z=+0.12m, back Z=−0.12m, both at waist height Y=1.0m. |
+| Garment scene | `simulation/scenes/garment_drape.py` | Mirrors `body_drape.py`. `total_frames=360` (stitch closure needs time at initial 0.24m gap). Stitch compliance `1e-6`. |
+| CLI registration | `simulation/__main__.py` | Add `garment_drape` to scene dispatch. |
+| **Test: garment drape** | `tests/integration/test_garment_drape.py` | 120 frames → NaN check, no body penetration, stitch gap < 0.01m. |
+
+##### Phase 5: T-Shirt Pattern
+
+| Task | File(s) | Details |
+|---|---|---|
+| T-shirt pattern | `data/patterns/tshirt.json` | Front + back bodice + 2 sleeves (4 panels). No new code — panel builder handles N panels generically. |
 
 **Sprint 2 Deliverable:**
 ```bash
-python -m simulation --pattern tshirt --fabric cotton
-# → storage/tshirt_cotton.glb
-# Open in Blender: T-shirt draped on body, seams closed, no penetration
+python -m simulation --scene garment_drape -v
+# → storage/garment_drape.glb — front/back panels stitched, draped on torso (no arch)
+
+python -m simulation --scene tshirt_drape -v
+# → storage/tshirt_drape.glb
 ```
 
 **Sprint 2 Validation Checklist:**
-- [ ] Spatial hash returns correct triangle candidates (no false negatives)
-- [ ] Point-triangle projection handles all cases (interior, edge, vertex)
-- [ ] Cloth does not penetrate body mesh at any point
-- [ ] No upward crumpling (the old SDF problem — should not occur with mesh-proxy)
-- [ ] Stitch constraint closes seam gaps to < 5mm
-- [ ] T-shirt and skirt patterns both produce valid drapes
+- [ ] Triangulation: no degenerate faces, all UVs in [0,1], interior density ~400 particles/panel
+- [ ] Stitch constraint closes seam gaps to < 1cm by frame 120
+- [ ] No body penetration at any frame
+- [ ] No NaN in any field
+- [ ] Visual: panels drape without arch (front/back start at correct torso depth)
 - [ ] Different fabrics (cotton vs silk vs denim) produce visibly distinct drapes
 
 ---

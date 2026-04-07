@@ -4,6 +4,201 @@ This document organizes progress history, encountered issues, structural adjustm
 
 ---
 
+### 📅 April 7, 2026 (Session 6): Body Profile Analysis & Panel Shape Exploration
+
+**Status:** 🔶 In Progress — Body analysis validated, panel shape NOT finalized.
+**Focus:** Building a data-driven body measurement pipeline and exploring parametric panel generation for the tank top garment.
+
+#### Accomplishments
+
+**Body Analysis v3 (`scripts/analyze_body.py`)**
+- Implemented robust body analyzer with **fixed torso X-limit (±0.20m)** to cleanly separate torso vertices from arm vertices on a continuous mannequin mesh.
+- Applied **median filtering (window=5)** on cross-section measurements to eliminate noise from sparse mesh regions.
+- Refined landmark detection:
+  - **Armpit**: Uses "arm-spread" heuristic — scans top-down through cross-sections, detects armpit where `arm_spread = total_width - torso_width` first exceeds 0.30m threshold. This correctly identifies Y≈1.23 (underarm fold), avoiding the Y≈1.29 (top of arm opening) or Y≈1.00 (hanging hands) misdetections.
+  - **Hip**: Narrowed search to Y=0.80–0.92 to capture the buttock fullness, not upper-thigh bone.
+  - **Shoulder**: Highest Y where arm vertices are detected (Y≈1.43).
+  - **Chest**: Maximum torso circumference cross-section (Y≈1.29).
+  - **Waist**: Minimum torso circumference cross-section (Y≈1.03).
+  - **Neck**: Narrowest cross-section above shoulders (Y≈1.52).
+- Exports comprehensive `data/bodies/mannequin_profile.json` (23 KB) with all cross-sections and landmarks.
+
+**Visualization Tool (`scripts/visualize_body.py`)**
+- Created Taichi GGUI-based body visualizer with real-time toggles for body mesh, landmark rings, cross-section rings, and measurement lines.
+- Each landmark rendered as a colored ring + sphere at the detected Y-height.
+- Used for rapid visual verification of landmark accuracy — enabled 3 iterations of armpit detection refinement in under 30 minutes.
+
+**Body Measurements Module (`simulation/mesh/body_measurements.py`)**
+- Clean module that loads from validated profile JSON.
+- Provides `BodyProfile` with interpolated cross-sections at arbitrary Y-heights via binary search + linear interpolation.
+- `wrap_point()` maps 2D panel coordinates (local_x, local_y) onto body elliptical cross-sections with configurable offset clearance.
+
+**Panel Preview v1–v3 (`scripts/preview_panels.py`)**
+- Three iterations of parametric panel generation, each attempting to produce a realistic tank top shape:
+  - **v1**: Basic armhole cut (0.15), 10% strap width → Armholes too small, straps too wide, neckline too wide.
+  - **v2**: Deeper armhole (0.30), straps at fixed interior positions (t=0.28/0.72) → Nightgown/V-neck shape. Straps placed inside armhole cut zone, leaving no shoulder coverage.
+  - **v3**: Straps following armhole edge (correct structure), 38% armhole cut, 7% strap width → Better tank top silhouette but still not professional quality. Jagged edges at neckline/strap transitions.
+
+#### Validated Body Measurements
+
+```
+Landmark         Y (m)    Width    Depth    Circ     Z-front  Z-back
+neck             1.520    0.149    0.172    0.506    0.275    0.098
+shoulder         1.434    0.394    0.176    0.929    0.232    0.056
+chest            1.290    0.399    0.241    1.021    0.279    0.034
+armpit           1.233    0.338    0.232    0.902    0.284    0.047
+waist            1.032    0.288    0.190    0.759    0.285    0.089
+hip              0.803    0.335    0.189    0.838    0.277    0.088
+```
+
+All landmarks visually verified against the mannequin mesh with the visualizer tool.
+
+#### Key Insights & Design Observations
+
+1. **Armpit detection is a gradient problem, not a threshold problem.** The armpit is where arm_spread transitions from small (<0.15m at shoulder) to large (>0.35m at elbow). The exact threshold matters: 0.20 catches the TOP of the arm opening (Y=1.29), 0.30 catches the MIDDLE (Y=1.23), 0.40 would catch the BOTTOM (Y=1.18). For garment construction, 0.30 gives the anatomically correct underarm fold position.
+
+2. **Panel shape is harder than panel placement.** Cylinder-wrapping panels onto the body is a solved problem (elliptical cross-section interpolation works). But defining the 2D panel outline — armhole depth, strap width, neckline scoop, taper — requires garment pattern design knowledge that is fundamentally different from physics simulation.
+
+3. **CLO3D uses FLAT panels, not pre-wrapped.** The user's reference image (CLO3D screenshot) shows a critical insight: professional garment simulators place panels FLAT near the body, then let the simulation drape them. They do NOT pre-wrap panels onto the body surface. Our current `wrap_point()` approach creates a skin-tight initial shape that:
+   - Clips into the body at narrow regions (hips, waist)
+   - Doesn't allow natural draping — the cloth starts conforming and has nowhere to settle
+   - Requires precise offset tuning per body region
+   - Produces a fundamentally different result than real garment simulation
+
+4. **The shape function approach (boolean mask on a grid) produces jagged edges.** The grid-sampling + shape function approach creates staircase artifacts at curved boundaries (armholes, necklines). Professional tools use spline-based panel outlines that naturally produce smooth boundaries regardless of mesh resolution.
+
+5. **Body cross-section is NOT elliptical.** Our `wrap_point()` assumes elliptical cross-sections (width/2 × sin(θ), depth/2 × cos(θ)), but the actual body is more complex — the chest protrudes forward, the back is flatter, and the sides are narrower. This creates asymmetric offset distances and potential body penetration at certain angles.
+
+6. **Seam edge alignment works perfectly with elliptical wrapping.** The seam edge analysis confirmed 0.0cm gap at all heights — front panel left edge meets back panel right edge exactly. This validates the mathematical symmetry of the wrap function.
+
+#### Issues Discovered
+
+| Issue | Severity | Detail |
+|-------|----------|--------|
+| **Panel shape not professional** | Blocking | After 3 iterations, the tank top shape still doesn't match a real garment pattern. Armhole curves, strap shapes, and neckline proportions don't match CLO3D reference. |
+| **Pre-wrapped placement is wrong approach** | Critical | CLO3D places panels FLAT near the body and lets simulation drape them. Our cylinder-wrap pre-conforms the cloth, preventing natural draping behavior. |
+| **Grid masking creates jagged edges** | Medium | Boolean shape function on a regular grid produces staircase artifacts at curved boundaries. |
+| **Body cross-section assumption (elliptical)** | Medium | Real body is not elliptical — chest protrudes, back is flat, sides are narrow. Offset varies by angle. |
+| **Hip region body penetration** | Medium | At hip level (Y≈0.80), the body widens and the panel wrapping with 3cm offset still clips into the body at certain angles. |
+
+#### Files Changed
+
+| File | Change |
+|------|--------|
+| `scripts/analyze_body.py` | Body analyzer v3: fixed torso X-limit, median smoothing, arm-spread armpit detection |
+| `scripts/visualize_body.py` | Taichi GGUI visualizer for body landmarks |
+| `scripts/preview_panels.py` | Panel preview v3: parametric tank top with profile-driven shape |
+| `simulation/mesh/body_measurements.py` | Body profile loader with interpolated cross-sections and wrap function |
+| `data/bodies/mannequin_profile.json` | Comprehensive body profile (cross-sections + landmarks) |
+
+#### Future Plan: Recommended Approach Change
+
+Based on the CLO3D reference image and the issues discovered in this session, the panel generation approach should be fundamentally revised:
+
+**Option A: Flat Panel Placement (CLO3D-style)**
+- Define panels as 2D polygon outlines in JSON (the `vertices_2d` approach already exists in `panel_builder.py`)
+- Use more vertices (12-16 per panel) to define smooth armhole/neckline curves
+- Place panels FLAT, positioned near but not touching the body (front panel at Z=0.32, back panel at Z=0.02)
+- Let the XPBD simulation + stitch constraints pull the panels around the body
+- This is the approach that `garment_drape.py` already implements — the problem is panel SHAPE, not panel PLACEMENT
+
+**Option B: Spline-Based Panel Definition (Recommended)**
+- Define panel outlines using Bézier curves or splines, not polygon vertices
+- Parametrize curves from body measurements (armhole depth = shoulder_y - armpit_y, neckline width = neck_width × 1.2, etc.)
+- Sample the splines at mesh resolution to produce smooth polygon boundaries
+- This decouples the design quality from mesh resolution
+
+**Option C: Import from CLO3D / DXF**
+- Import industry-standard pattern files (DXF format) created by actual pattern designers
+- Parse the 2D outlines into our `vertices_2d` format
+- This bypasses the pattern design problem entirely
+
+**Recommended next step:** Option B with flat placement. Use the validated body measurements to parametrize Bézier-based panel outlines, produce a smooth polygon, feed it to the existing `triangulate_panel()` + `panel_builder.py` pipeline, and let the simulation drape it.
+
+---
+
+### 📅 April 7, 2026 (Session 5): Sprint 2 Layer 3b-Extended — Phases 1–4 (Partial)
+
+#### Accomplishments
+
+**Phase 1 — Triangulation (`simulation/mesh/triangulation.py`)**
+- Implemented `triangulate_panel(vertices_2d, resolution)` using a grid-clip approach: bounding-box grid → point-in-polygon filter → add boundary vertices → earcut triangulate.
+- Returns `TriangulatedPanel` with `positions` (XZ plane, Y=0), `faces`, `edges`, `uvs` (normalized [0,1]²), and `boundary_indices` (polygon corner indices).
+- 21 unit tests passing.
+
+**Phase 2 — Stitch Constraints (`simulation/constraints/stitch.py`)**
+- Implemented `StitchConstraints`: zero rest-length XPBD distance constraint kernel. Compliance `1e-6` closes a 0.24m gap in ~80 iterations.
+- Wired into `ConstraintSet` and `XPBDSolver.step()` (projects after bending).
+- **Critical:** No `from __future__ import annotations` in this file — `.template()` parameters break Taichi JIT under string annotation resolution.
+- 11 unit tests passing.
+
+**Phase 3 — Panel Builder (`simulation/mesh/panel_builder.py`)**
+- Implemented `build_garment_mesh(pattern_path, resolution) → GarmentMesh`.
+- Parses pattern JSON, triangulates each 2D panel, applies 3D placement transform (Ry rotation + translation), merges panels into global vertex/face/edge arrays, resolves stitch definitions → global vertex index pairs via `_find_edge_particles`.
+- Added `rotation_x_deg` support to `_apply_placement` (applied before Ry). With `rotation_x_deg=-90`, local XZ panels become vertical XY panels (pattern height maps to world Y). Backward compatible — defaults to 0°.
+- 21 unit tests passing.
+
+**Phase 4 — Garment Drape Scene (`simulation/scenes/garment_drape.py`)**
+- Implemented `run_garment_drape()` mirroring `body_drape.py`: loads pattern JSON via `build_garment_mesh`, applies area-weighted inv_mass, wires `StitchConstraints + XPBDSolver + BodyCollider + ClothSelfCollider + SimulationEngine`.
+- Registered `garment_drape` in `simulation/__main__.py` and `scenes/__init__.py`.
+- 12 integration tests passing (195/195 total).
+- Visual verification script: `scripts/visualize_phase4_garment_drape.py` — exports initial panels, body mesh, and simulated result GLBs.
+
+#### Issues Discovered
+
+**Issue 1 — Panels horizontal, not vertical (FIXED)**
+Initial `tank_top.json` placement used only `rotation_y_deg`, so local XZ panels landed as horizontal sheets at a fixed world Y (like a rug at Y=0.65). Fixed by adding `rotation_x_deg: -90` to `_apply_placement`: local `(x, 0, z)` → Rx(-90) → `(x, z, 0)`, making panel height (local Z) map to world Y. Stitch definitions also corrected — back panel edge indices are swapped after 180° Y rotation.
+
+**Issue 2 — Mannequin not centered at Z=0 (UNFIXED — blocks correct placement)**
+
+Measured mannequin geometry:
+```
+Overall Z: [0.031, 0.346]  — entirely in positive Z, NOT symmetric around Z=0
+Body center Z ≈ 0.185m
+
+At Y≈1.00m (mid-torso):
+  Front surface Z_max ≈ 0.285m
+  Back surface  Z_min ≈ 0.078m
+
+At Y≈1.20m (chest):
+  Front surface Z_max ≈ 0.284m
+  Back surface  Z_min ≈ 0.063m
+```
+Current `tank_top.json` places front panel at Z=0.20 — this is **inside** the mannequin chest (front surface at Z=0.285). Particles starting inside the body collider give unreliable push-out directions, causing the cloth to fall through.
+
+**Required fix:** Front panel at Z≈0.31 (2cm outside Z=0.285), back panel at Z≈0.04 (3cm outside Z=0.07), Y starting at 0.85 (above hip/crotch narrow area). Back panel position in JSON must be `[0.2, 0.85, 0.04]`.
+
+**Issue 3 — Only 4 stitch pairs for a 388-particle mesh (UNFIXED — causes spike artifacts)**
+
+`_find_edge_particles` finds particles within `edge_len * 0.05` (5%) of the seam edge. For edge_len=0.7m, tolerance=0.035m. The first interior grid column is at X=0.0364m — just outside tolerance (0.0364 > 0.035). Only the 2 corner vertices per seam edge are found, giving 4 stitch pairs total (2 seams × 2 corners).
+
+With only 4 point-connections on a 70cm seam, unconstrained interior particles fall freely, creating the spiked triangle artifacts visible in Blender.
+
+**Required fix:** Increase `_find_edge_particles` tolerance from `edge_len * 0.05` to `edge_len * 0.10`. This makes tolerance=0.07m, which includes the first interior grid column at X=0.036m. Expect ~18-20 stitch pairs per seam after fix (~40 total).
+
+#### Key Insights
+
+- **Mannequin Z offset is non-obvious:** The body mesh origin is NOT at the body's geometric center in Z. Any code that assumes symmetric ±Z placement around Z=0 will intersect the mesh. Always measure the actual surface extents before placing garment panels.
+- **`linspace` includes endpoints, earcut boundary is corners only:** `triangulate_panel` uses `np.linspace(bb_min, bb_max, res)` which includes boundary values (X=0 and X=0.4), but `_point_in_polygon` classifies exact-boundary points as outside, filtering them. The `boundary_indices` array contains only the original polygon corner vertices (4 for a rectangle). Interior grid columns nearest the seam edge are just outside the 5% tolerance. Increasing to 10% correctly captures the first interior column.
+- **`rotation_x_deg` precedes `rotation_y_deg`:** The combined rotation is `R_final = Ry @ Rx`. Applying Rx first (lift the flat XZ panel to vertical XY) then Ry (rotate the now-vertical panel in the horizontal plane) gives intuitive results. Reversing the order produces nonsensical orientations.
+- **Pattern stitch edges are panel-relative after Y-flip:** After `rotation_y_deg=180`, the back panel's polygon vertex 0 (originally bottom-left at X=0) maps to world X=+0.2 and vertex 1 (originally bottom-right at X=0.4) maps to world X=−0.2. Left-seam must connect front edge [0,3] to back edge [1,2], not [0,3]↔[0,3].
+
+#### Test Counts
+- **Unit:** 146/146 (21 triangulation + 11 stitch + 21 panel_builder + 93 pre-existing)
+- **Integration:** 49/49 (12 garment_drape + 37 pre-existing)
+- **Total: 195/195**
+
+#### Remaining Work Before Phase 4 is Complete
+
+1. **Fix `_find_edge_particles` tolerance** (`panel_builder.py`): `edge_len * 0.05` → `edge_len * 0.10`
+2. **Fix `tank_top.json` panel placement** based on measured body geometry:
+   - Front: `position=[-0.2, 0.85, 0.31]`
+   - Back: `position=[0.2, 0.85, 0.04]`
+3. **Verify end-to-end** with `python -m simulation --scene garment_drape -v` (live visualizer)
+4. Once stable: run **Phase 5** (t-shirt: `data/patterns/tshirt.json`, 4 panels)
+
+---
+
 ### 📅 April 6, 2026 (Session 4): Finalizing XPBD Realism and Settling Fixes
 
 **Status:** ✅ Optimized — Cloth settles at ~0.15 m/s; 130/130 tests passing.
@@ -639,7 +834,7 @@ The primary blockers spanning from the previous handoff were intense instability
    - *Fix:* Kept the mathematically stable `min-euclidean` tracking strategy, but implemented a *Depth Thresholded Backface-Culling* logic hook (`outward_check >= -0.05`). This correctly rejects particles sitting immediately "inside" a seam's interpolated normal, while firmly arresting and resolving any particle undergoing genuinely deep structural tunneling constraint-pulls without bypassing the hash grid.
 
 #### Key Ecosystem Observations
-- Visual testing exposes major validation gaps where mathematically sound tests break due to simulation logic misalignments (e.g., tests simulating 60 frames pass because the cloth is draping, but 120 scripts fail natively when the cloth successfully slides linearly off uncentered geometry over time). 
+- Visual testing exposes major validation gaps where mathematically sound tests break due to simulation logic misalignments (e.g., tests simulating 60 frames pass because the cloth is draping, but 120 scripts fail natively when the cloth successfully slides linearly off uncentered geometry over time).
 - `.glb` imports natively handle `Y` (vertical axes) standard protocols perfectly; however, Blender intercepts structural `.glb` properties defaulting them into static walls unless actively rotated or wrapped inside export scenes natively.
 
 #### Future Plans
@@ -649,7 +844,7 @@ The primary blockers spanning from the previous handoff were intense instability
 
 ### 📅 April 3, 2026: Sprint 2 Layer 3a — Collision Resolver Investigation & Mesh Pipeline
 
-**Status:** ⚠️ In Progress — 10/12 integration tests passing (same count, different failing tests)  
+**Status:** ⚠️ In Progress — 10/12 integration tests passing (same count, different failing tests)
 **Focus:** Fix the 2 remaining failing integration tests in the body mesh collision layer. Validate and stabilize the body mesh asset pipeline.
 
 #### Body Mesh Asset Pipeline
@@ -667,13 +862,13 @@ The new `mannequin.glb` (Sketchfab asset) was evaluated alongside a single-objec
 
 The two failing tests are in tension with each other. Three candidate selection strategies were tested:
 
-**Strategy 1 (original): Max-sd + 0.10m Euclidean guard**  
+**Strategy 1 (original): Max-sd + 0.10m Euclidean guard**
 Tracks the shallowest penetrating triangle (maximum signed distance < thickness). Gives: energy_decay = 1.44 m/s (fails < 1.0), crumpling max_y = 2.05m (fails ≤ 1.85m). Root cause: false-hit triangles in the 0.063–0.10m euclidean range win the max-sd comparison when their normals happen to be close to 0.
 
-**Strategy 2: Max-sd + cell_size × 2.0 Euclidean guard (0.063m)**  
+**Strategy 2: Max-sd + cell_size × 2.0 Euclidean guard (0.063m)**
 Tightens the guard to scale with mesh resolution. Fixes crumpling (max_y ≤ 1.85m ✅) but causes energy explosion (35.9 m/s ❌). A wrong-normal triangle within the 0.063m zone wins max-sd and injects energy systematically every substep.
 
-**Strategy 3 (current code): Min-euclidean + cell_size × 2.0 Euclidean guard**  
+**Strategy 3 (current code): Min-euclidean + cell_size × 2.0 Euclidean guard**
 Selects the nearest triangle (minimum euclidean distance to closest point). Applies response only if nearest triangle has sd < thickness. Gives: energy_decay = 0.63 m/s ✅, crumpling max_y = 1.96m ❌ (still exceeds 1.85m by 0.11m). The upward crumpling is less severe than before but still fails. Cause: at mesh seam boundaries and open-boundary edges (59 disconnected components means seam edges are everywhere), the nearest triangle's interpolated normal is rotated relative to the true outward normal.
 
 The core dilemma: no single candidate selection strategy fixes both tests simultaneously given the current mesh geometry and test thresholds.
@@ -706,7 +901,7 @@ The core dilemma: no single candidate selection strategy fixes both tests simult
 
 ### 📅 April 2, 2026 (Late PM): Sprint 2 Layer 3a-Extended — Body Mesh Collision
 
-**Status:** ⚠️ In Progress — 10/12 integration tests passing  
+**Status:** ⚠️ In Progress — 10/12 integration tests passing
 **Focus:** Replace `SphereCollider` with `BodyCollider` using static spatial hash + point-triangle projection. Cloth grid dropped above the mannequin should drape over shoulders with zero penetration.
 
 #### Completed Work
@@ -730,17 +925,17 @@ The core dilemma: no single candidate selection strategy fixes both tests simult
 
 #### Issues Encountered & Root Causes
 
-**Bug 1 — Taichi i32 overflow in hash build (FIXED)**  
-`_hash_cell_np` in `spatial_hash.py` used Python unlimited integers. Taichi's `ti.i32` wraps on overflow (C-style). For body mesh coordinates (ix up to ~32), `32 × 73856093 = 2.36e9` overflows `ti.i32` max (2.15e9), giving a different bit pattern. Triangles went into wrong hash buckets — the kernel found wrong candidates for every overflowing cell. Effect: particle teleportation (134 m/s mean speed).  
+**Bug 1 — Taichi i32 overflow in hash build (FIXED)**
+`_hash_cell_np` in `spatial_hash.py` used Python unlimited integers. Taichi's `ti.i32` wraps on overflow (C-style). For body mesh coordinates (ix up to ~32), `32 × 73856093 = 2.36e9` overflows `ti.i32` max (2.15e9), giving a different bit pattern. Triangles went into wrong hash buckets — the kernel found wrong candidates for every overflowing cell. Effect: particle teleportation (134 m/s mean speed).
 *Fix:* `((ix * P1) & 0xFFFFFFFF) ^ ...` — mask to 32-bit before XOR to match Taichi's wrapping exactly. Must not use `np.int32()` constructor — raises `OverflowError` for values > `int32_max`.
 
-**Bug 2 — Hash collision false positives (PARTIALLY FIXED)**  
-Even with correct key arithmetic, a 65536-bucket table with ~300K entries has genuine hash bucket collisions. A shoulder particle (Y≈1.5m) would receive foot triangle candidates (Y≈0.05m). If the foot's vertex normals point downward (−Y), the signed distance `dot(p − closest, n)` from the shoulder particle is large-negative, triggering a collision response that teleports the particle 1.4m toward the foot.  
-*Partial fix:* Added Euclidean distance guard (`|p − closest| > 0.1m → skip`) and changed from tracking minimum sd (deepest penetration) to maximum sd (shallowest — outermost surface). Improved mean speed from 134 m/s → 1.44 m/s.  
+**Bug 2 — Hash collision false positives (PARTIALLY FIXED)**
+Even with correct key arithmetic, a 65536-bucket table with ~300K entries has genuine hash bucket collisions. A shoulder particle (Y≈1.5m) would receive foot triangle candidates (Y≈0.05m). If the foot's vertex normals point downward (−Y), the signed distance `dot(p − closest, n)` from the shoulder particle is large-negative, triggering a collision response that teleports the particle 1.4m toward the foot.
+*Partial fix:* Added Euclidean distance guard (`|p − closest| > 0.1m → skip`) and changed from tracking minimum sd (deepest penetration) to maximum sd (shallowest — outermost surface). Improved mean speed from 134 m/s → 1.44 m/s.
 *Remaining:* 2 tests still fail (energy: 1.44 m/s > 1.0 threshold; upward crumpling: max Y = 2.05m > 1.85m). The 0.1m Euclidean threshold is still too loose for this mesh's cell_size (0.016m). Proposed next fix: tighten to `cell_size × 2 ≈ 0.035m`.
 
-**Bug 3 — trimesh decimation API (FIXED)**  
-`mesh.simplify_quadric_decimation(5000)` passes `5000` as `percent` (first positional arg, expected 0–1), not face count. Raises `"target_reduction must be between 0 and 1"`.  
+**Bug 3 — trimesh decimation API (FIXED)**
+`mesh.simplify_quadric_decimation(5000)` passes `5000` as `percent` (first positional arg, expected 0–1), not face count. Raises `"target_reduction must be between 0 and 1"`.
 *Fix:* Use `face_count=5000` as keyword argument.
 
 #### Key Observations & Insights
@@ -808,18 +1003,18 @@ Even with correct key arithmetic, a 65536-bucket table with ~300K entries has ge
 **Focus:** Implementing the core analytical sphere collider mechanism into the solver alongside debugging and GUI hooks.
 
 #### Completed Work & Implemented Features
-- **Core XPBD Engine (Layer 1 & Layer 2):** Distance constraints and Isometric Bending constraints are fully processed efficiently via finite difference abstractions. 
+- **Core XPBD Engine (Layer 1 & Layer 2):** Distance constraints and Isometric Bending constraints are fully processed efficiently via finite difference abstractions.
 - **Analytical Sphere Collider (Layer 3a):** We established swift penetration bounds checking, normal push-out vectorization, and tangent friction integrations. Collision resolves are executed directly interleaved within the XPBD iterative solver hook ensuring stable resolutions against large timesteps natively avoiding "overshooting".
 - **Realtime Diagnostic Viewer Expansion:** Wrote a cross-platform live viewer running off Taichi's GGUI (`window.get_scene()`) initialized by dropping `--visualize / -v` onto standard CLI executions (`freefall`, `constrained_fall`, `sphere_drape`), drastically increasing feedback density while preserving raw computational performance.
 - **Project Structure Refactor:** To ensure immediate scalable capacity over scaling scene scripts as complexity rises, decoupled all heavy testing environments out from root `__main__.py` into their respective `backend/simulation/scenes/*.py` namespaces properly abstracting user inputs from heavy scene boilerplate.
 - **Organized Outputs:** All physics exports have been securely bound to dump out to `backend/outputs/` directory dynamically creating themselves, eliminating noise out of the repo root.
 
 #### Issues Encountered & Diagnostics
-- **Taichi Compilation Strictness (`ti.template()` Error):** 
+- **Taichi Compilation Strictness (`ti.template()` Error):**
   - *Cause:* Found a severe breakdown over parsing generic template bounds while tracking object attributes if `from __future__ import annotations` was universally declared inside the scope.
   - *Solution:* Dropped future annotation requirements inside Taichi-heavy logic modules (`sphere_collider.py`) limiting usage to isolated global methods where `ti.template()` could parse securely directly into native Python ast.
 - **"Motionless" Output Confusion:**
-  - *Cause:* Standard `obj` execution natively renders statically, and initial tests failed to artificially stitch the analytical sphere collision points directly into the returned export geometry. 
+  - *Cause:* Standard `obj` execution natively renders statically, and initial tests failed to artificially stitch the analytical sphere collision points directly into the returned export geometry.
   - *Solution:* Hardcoded programmatic `trimesh.icosphere` integration into final frame output geometries. We now inject both meshes offset intelligently so viewing agents/teams see exactly what collided. Appended realtime `-v` functionality for deeper diagnostics instead.
 
 #### Observations & Lessons Learned

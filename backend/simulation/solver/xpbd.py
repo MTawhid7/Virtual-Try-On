@@ -22,7 +22,7 @@ class XPBDSolver:
     """
     XPBD Gauss-Seidel constraint solver.
 
-    Projects constraints in order: distance → bending → (stitch in Sprint 2).
+    Projects constraints in order: distance → bending → stitch.
     Called `solver_iterations` times per substep by the engine.
 
     This implements the SolverStrategy Protocol:
@@ -35,6 +35,7 @@ class XPBDSolver:
         constraints: ConstraintSet,
         stretch_compliance: float = 1e-8,
         bend_compliance: float = 1e-3,
+        stitch_compliance: float = 1e-6,
         max_stretch: float | None = None,
         max_compress: float | None = None,
         stretch_damping: float = 0.0,
@@ -48,6 +49,8 @@ class XPBDSolver:
                 combined with 10 iterations").
             bend_compliance: XPBD compliance for bending constraints.
                 Higher = more drapey. Controls fold sharpness.
+            stitch_compliance: XPBD compliance for stitch constraints.
+                1e-6 closes a 0.24m gap in ~60–80 frames (Sprint 2 default).
             max_stretch: Hard upper strain limit as a fraction of rest length
                 (e.g. 0.03 = 3%).  None = disabled.
             max_compress: Hard lower strain limit as a fraction of rest length
@@ -62,6 +65,7 @@ class XPBDSolver:
         self.constraints = constraints
         self.stretch_compliance = stretch_compliance
         self.bend_compliance = bend_compliance
+        self._stitch_compliance = float(stitch_compliance)
         self._max_stretch = float(max_stretch) if max_stretch is not None else None
         self._max_compress = float(max_compress) if max_compress is not None else None
         self._stretch_damping = float(stretch_damping)
@@ -82,7 +86,7 @@ class XPBDSolver:
 
     def step(self, state: ParticleState, dt: float) -> None:
         """
-        Perform one solver iteration: distance → bending → strain limit.
+        Perform one solver iteration: distance → bending → stitch → strain limit.
 
         Called `solver_iterations` times per substep.
         """
@@ -103,6 +107,16 @@ class XPBDSolver:
                 state.inv_mass,
                 self.constraints.bending.n_hinges,
                 self.bend_compliance,
+                dt,
+            )
+
+        # Stitch constraints (zero rest-length, pulls seam vertices together)
+        if self.constraints.stitch is not None:
+            self.constraints.stitch.project(
+                state.positions,
+                state.inv_mass,
+                self.constraints.stitch.n_stitches,
+                self._stitch_compliance,
                 dt,
             )
 

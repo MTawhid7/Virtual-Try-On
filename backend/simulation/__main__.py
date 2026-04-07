@@ -13,13 +13,13 @@ import argparse
 import sys
 import os
 
-from simulation.scenes import run_freefall, run_constrained_fall, run_sphere_drape, run_body_drape
+from simulation.scenes import run_freefall, run_constrained_fall, run_sphere_drape, run_body_drape, run_garment_drape
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Garment Simulation Engine")
     parser.add_argument(
         "--scene", type=str, default="freefall",
-        choices=["freefall", "constrained_fall", "sphere_drape", "body_drape"],
+        choices=["freefall", "constrained_fall", "sphere_drape", "body_drape", "garment_drape"],
         help="Built-in test scene to run",
     )
     parser.add_argument(
@@ -48,6 +48,8 @@ def main() -> None:
         run_sphere_drape(visualize=args.visualize, output_path=output_path)
     elif args.scene == "body_drape":
         run_body_drape(visualize=args.visualize, output_path=output_path)
+    elif args.scene == "garment_drape":
+        run_garment_drape(visualize=args.visualize, output_path=output_path)
     else:
         print(f"Unknown scene: {args.scene}", file=sys.stderr)
         sys.exit(1)

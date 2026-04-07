@@ -1,0 +1,36 @@
+{
+  "name": "TankTop",
+  "panels": [
+    {
+      "id": "front",
+      "vertices_2d": [[0.0, 0.0], [0.52, 0.0], [0.52, 0.7], [0.0, 0.7]],
+      "placement": {
+        "position": [-0.26, 0.85, 0.30],
+        "rotation_x_deg": -90,
+        "rotation_y_deg": 0
+      }
+    },
+    {
+      "id": "back",
+      "vertices_2d": [[0.0, 0.0], [0.52, 0.0], [0.52, 0.7], [0.0, 0.7]],
+      "placement": {
+        "position": [0.26, 0.85, 0.02],
+        "rotation_x_deg": -90,
+        "rotation_y_deg": 180
+      }
+    }
+  ],
+  "stitches": [
+    {
+      "comment": "Left side seam: front vertex 0→3 (X=-0.26) stitched to back vertex 1→2 (X=-0.26)",
+      "panel_a": "front", "edge_a": [0, 3],
+      "panel_b": "back",  "edge_b": [1, 2]
+    },
+    {
+      "comment": "Right side seam: front vertex 1→2 (X=+0.26) stitched to back vertex 0→3 (X=+0.26)",
+      "panel_a": "front", "edge_a": [1, 2],
+      "panel_b": "back",  "edge_b": [0, 3]
+    }
+  ],
+  "fabric": "cotton"
+}

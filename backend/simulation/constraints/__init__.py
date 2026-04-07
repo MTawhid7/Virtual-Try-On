@@ -14,6 +14,7 @@ from numpy.typing import NDArray
 
 from simulation.constraints.distance import DistanceConstraints
 from simulation.constraints.bending import BendingConstraints
+from simulation.constraints.stitch import StitchConstraints
 
 
 @dataclass
@@ -22,7 +23,7 @@ class ConstraintSet:
 
     distance: DistanceConstraints | None = None
     bending: BendingConstraints | None = None
-    # stitch: StitchConstraints | None = None  # Sprint 2
+    stitch: StitchConstraints | None = None
 
     def reset_lambdas(self) -> None:
         """Reset all Lagrange multipliers at the start of each substep."""
@@ -30,14 +31,18 @@ class ConstraintSet:
             self.distance.reset_lambdas()
         if self.bending is not None:
             self.bending.reset_lambdas()
+        if self.stitch is not None:
+            self.stitch.reset_lambdas()
 
 
 def build_constraints(
     positions: NDArray[np.float32],
     edges: NDArray[np.int32] | None = None,
     faces: NDArray[np.int32] | None = None,
+    stitch_pairs: NDArray[np.int32] | None = None,
     max_edges: int = 100_000,
     max_hinges: int = 100_000,
+    max_stitches: int = 10_000,
     enable_distance: bool = True,
     enable_bending: bool = True,
 ) -> ConstraintSet:
@@ -48,8 +53,11 @@ def build_constraints(
         positions: (N, 3) initial vertex positions.
         edges: (E, 2) edge vertex pairs (for distance constraints).
         faces: (F, 3) triangle vertex indices (for bending constraints).
+        stitch_pairs: (S, 2) global vertex index pairs to stitch together
+                      with zero rest-length constraints (Sprint 2).
         max_edges: Pre-allocation size for distance constraint fields.
         max_hinges: Pre-allocation size for bending constraint fields.
+        max_stitches: Pre-allocation size for stitch constraint fields.
         enable_distance: Whether to create distance constraints.
         enable_bending: Whether to create bending constraints.
 
@@ -72,5 +80,11 @@ def build_constraints(
             constraint_set.bending = bend
         else:
             constraint_set.bending = None
+
+    # Stitch constraints from panel seam vertex pairs
+    if stitch_pairs is not None and len(stitch_pairs) > 0:
+        stitch = StitchConstraints(max_stitches=max_stitches)
+        stitch.initialize(stitch_pairs)
+        constraint_set.stitch = stitch
 
     return constraint_set

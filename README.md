@@ -63,6 +63,10 @@ python -m simulation --scene sphere_drape -v   # live Taichi GGUI visualizer
 python -m simulation --scene body_drape
 # → storage/body_drape.glb
 
+# Sprint 2 Layer 3b-Extended: pattern-based garment draped on body
+python -m simulation --scene garment_drape
+# → storage/garment_drape.glb
+
 # Export to custom path
 python -m simulation --scene sphere_drape -o my_output.glb
 ```
@@ -97,7 +101,10 @@ python -m pytest tests/integration/ -v
 | **Sprint 2, Fabric Realism** | ✅ | Area-weighted particle mass (lumped-mass FEM, density from `FabricPreset`), softer cotton bending (`bend_compliance 8e-4→7.4e-3`), reduced damping/friction, grid 40×40→60×60, solver iterations 2→8. Cloth now forms visible folds and conforms to body surface. |
 | **Sprint 2, Algorithm Upgrades** | ✅ | Track A: analytical bending gradients (cotangent-weighted ∂θ/∂p, closes-form Bergou formula). Track B: hard strain limiting per substep (Provot/Müller clamping). Track C: cloth self-collision (dynamic centroid hash, 1-ring exclusion, euclidean penetration gate). Track D: constraint-based velocity damping (stretch + bend modes). |
 | **Sprint 2, Draping Realism** | ✅ | Fixed collision velocity injection (body/self) by updating `predicted[i] += correction`, preventing energy buildup. Reordered simulation loop: self-collision now runs once per substep **before** the XPBD iterations. Shrunk resting friction zone (5.0→1.5 thickness), relaxed Cotton `max_compress` (1%→10%), and softened bending (1.5e-2). Cloth now settles fully (mean speed ~0.15 m/s) and conforms smoothly without "floating." |
-| **Sprint 2, Layer 3b-Ext** | ⬜ | Pattern JSON → earcut triangulation, stitch constraints, full garment pipeline |
+| **Sprint 2, Layer 3b-Ext Ph1–3** | ✅ | Pattern triangulation (`triangulation.py`), stitch constraints (`constraints/stitch.py`), panel builder (`panel_builder.py`). 146/146 unit tests. |
+| **Sprint 2, Layer 3b-Ext Ph4** | 🔶 | Garment drape scene wired (`scenes/garment_drape.py`), 195/195 tests pass. Two fixes pending: panel placement (mannequin not at Z=0) and stitch edge tolerance (see worklog). |
+| **Sprint 2, Body Analysis** | 🔶 | Body profile analyzer v3 with validated landmarks (neck, shoulder, armpit, chest, waist, hip). Parametric panel shape exploration — 3 iterations, not yet professional quality. Key insight: CLO3D uses flat panels + simulation draping, not pre-wrapped placement. |
+| **Sprint 2, Layer 3b-Ext Ph5** | ⬜ | T-shirt pattern — 4 panels (front/back bodice + 2 sleeves) |
 | **Sprint 3** | ⬜ | FastAPI backend, Next.js + R3F frontend |
 | **Sprint 4** | ⬜ | Integration, polish, end-to-end testing |
 
