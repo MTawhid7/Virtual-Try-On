@@ -101,7 +101,7 @@ class SimulationEngine:
         self.collider = None       # Body / sphere collider (set externally)
         self.self_collider = None  # Cloth self-collider (set externally)
 
-    def step_frame(self, state: ParticleState) -> None:
+    def step_frame(self, state: ParticleState, rest_length_scale: float = 1.0) -> None:
         """Run one full frame of simulation (executes multiple substeps)."""
         config = self.config
         # Integrator is stateless, so instantiating here is extremely lightweight
@@ -131,7 +131,7 @@ class SimulationEngine:
             # 4. Solve constraints (XPBD iterations, body collision interleaved)
             if self.solver is not None:
                 for _iteration in range(config.solver_iterations):
-                    self.solver.step(state, config.substep_dt)
+                    self.solver.step(state, config.substep_dt, rest_length_scale)
 
                     # Body collision interleaved — static geometry, safe to repeat
                     if self.collider is not None:
@@ -163,7 +163,15 @@ class SimulationEngine:
 
         # --- Main simulation loop ---
         for frame in range(config.total_frames):
-            self.step_frame(state)
+            # Dynamic shrink phase calculation
+            if config.shrink_frames > 0 and frame < config.shrink_frames:
+                # Linearly interpolate from initial_scale down to 1.0
+                progress = frame / float(config.shrink_frames)
+                rest_scale = config.initial_scale - (config.initial_scale - 1.0) * progress
+            else:
+                rest_scale = 1.0
+
+            self.step_frame(state, rest_length_scale=rest_scale)
 
             if progress_callback:
                 progress_callback(frame + 1, config.total_frames)

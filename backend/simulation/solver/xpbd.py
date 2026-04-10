@@ -84,7 +84,7 @@ class XPBDSolver:
         """Reset all Lagrange multipliers — called at start of each substep."""
         self.constraints.reset_lambdas()
 
-    def step(self, state: ParticleState, dt: float) -> None:
+    def step(self, state: ParticleState, dt: float, rest_length_scale: float = 1.0) -> None:
         """
         Perform one solver iteration: distance → bending → stitch → strain limit.
 
@@ -98,6 +98,7 @@ class XPBDSolver:
                 self.constraints.distance.n_edges,
                 self.stretch_compliance,
                 dt,
+                rest_length_scale,
             )
 
         # Bending constraints (analytical cotangent gradients)
@@ -132,6 +133,7 @@ class XPBDSolver:
                 self.constraints.distance.n_edges,
                 self._max_stretch,
                 self._max_compress,
+                rest_length_scale,
             )
 
     def apply_damping(self, state: ParticleState) -> None:

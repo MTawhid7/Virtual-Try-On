@@ -34,6 +34,7 @@ class TriangulatedPanel:
     edges: NDArray[np.int32]         # (E, 2) — unique structural + shear edges
     uvs: NDArray[np.float32]         # (N, 2) — UV coords normalized to [0,1]²
     boundary_indices: NDArray[np.int32]  # (B,) — indices of polygon boundary vertices
+    original_vertex_mapping: NDArray[np.int32]  # (V,) — maps original poly vertex idx to index in boundary_indices
 
 
 def _point_in_polygon(points: NDArray[np.float64], polygon: NDArray[np.float64]) -> NDArray[np.bool_]:
@@ -105,54 +106,68 @@ def triangulate_panel(
 
     if extent[0] >= extent[1]:
         res_x, res_z = res_long, res_short
-    else:
-        res_x, res_z = res_short, res_long
+    # Calculate target area and edge
+    longer = max(extent[0], extent[1])
+    # Target 1.5cm segments for high detail
+    target_edge = 0.015 
+    target_area = (np.sqrt(3) / 4) * (target_edge ** 2)
 
-    # --- Generate interior grid candidates ---
-    xs = np.linspace(bb_min[0], bb_max[0], res_x)
-    zs = np.linspace(bb_min[1], bb_max[1], res_z)
-    gx, gz = np.meshgrid(xs, zs)
-    grid_pts = np.stack([gx.ravel(), gz.ravel()], axis=1)  # (res_x*res_z, 2)
-
-    # Keep only points strictly inside the polygon
-    inside_mask = _point_in_polygon(grid_pts, poly)
-    interior_pts = grid_pts[inside_mask]  # (M, 2)
-
-    # --- Combine boundary + interior points ---
-    # Boundary comes first so boundary_indices are [0..P-1]
-    all_pts_2d = np.concatenate([poly, interior_pts], axis=0)  # (P+M, 2)
-    boundary_indices = np.arange(len(poly), dtype=np.int32)
-
-    n_pts = len(all_pts_2d)
-
-    # --- Earcut triangulation ---
-    # earcut requires: vertices as float32 (N, 2), rings as uint32 [N]
-    verts_f32 = all_pts_2d.astype(np.float32)
-    rings = np.array([n_pts], dtype=np.uint32)
-    flat_indices = mapbox_earcut.triangulate_float32(verts_f32, rings)  # (T*3,) uint32
-    flat_indices = flat_indices.astype(np.int32)
-
-    if len(flat_indices) == 0:
-        raise ValueError("Earcut returned no triangles — polygon may be degenerate or self-intersecting")
-
-    faces = flat_indices.reshape(-1, 3)  # (F, 3)
-
-    # Remove degenerate triangles (zero area)
-    v0 = all_pts_2d[faces[:, 0]]
-    v1 = all_pts_2d[faces[:, 1]]
-    v2 = all_pts_2d[faces[:, 2]]
-    cross_z = (v1[:, 0] - v0[:, 0]) * (v2[:, 1] - v0[:, 1]) - \
-               (v1[:, 1] - v0[:, 1]) * (v2[:, 0] - v0[:, 0])
-    valid = np.abs(cross_z) > 1e-10
-    faces = faces[valid].astype(np.int32)
-
-    if len(faces) == 0:
-        raise ValueError("No valid (non-degenerate) triangles after filtering")
+    # --- Subdivide boundary to enable 'triangle' refinement ---
+    original_vertices = list(poly)
+    steiner_points = []
+    
+    n_poly = len(poly)
+    # the ordered path of indices along the boundary
+    path_indices = []
+    
+    for i in range(n_poly):
+        path_indices.append(i)
+        p0 = poly[i]
+        p1 = poly[(i + 1) % n_poly]
+        dist = np.linalg.norm(p1 - p0)
+        
+        n_splits = int(np.ceil(dist / target_edge))
+        if n_splits > 1:
+            for k in range(1, n_splits):
+                steiner_idx = n_poly + len(steiner_points)
+                path_indices.append(steiner_idx)
+                steiner_points.append(p0 + (p1 - p0) * (k / n_splits))
+                
+    poly_subdiv = np.array(original_vertices + steiner_points, dtype=np.float64)
+    n_pts = len(poly_subdiv)
+    
+    # build segments from path_indices
+    seg_list = []
+    for i in range(len(path_indices)):
+        seg_list.append([path_indices[i], path_indices[(i + 1) % len(path_indices)]])
+    segments = np.array(seg_list, dtype=np.int32)
+    
+    A = {"vertices": poly_subdiv, "segments": segments}
+    
+    import triangle as tr
+    B = tr.triangulate(A, f"pq30Ya{target_area:.6f}")
+    
+    all_pts_2d = B["vertices"].astype(np.float32)
+    faces = B["triangles"].astype(np.int32)
+    n_total_pts = len(all_pts_2d)
+    
+    # Robustly find the indices of the original corners in the new mesh
+    # This prevents the 'webbing' caused by vertex reordering in triangle.lib
+    from scipy.spatial import KDTree
+    tree = KDTree(all_pts_2d)
+    _, original_vertex_mapping = tree.query(poly)
+    old_to_new_mapping = original_vertex_mapping.astype(np.int32)
+    
+    # Path indices now refer to the high-res boundary
+    # Find closest vertices for all path points to be safe
+    _, boundary_indices = tree.query(poly_subdiv)
+    boundary_indices = boundary_indices.astype(np.int32)
 
     # --- Lift 2D → 3D (XZ plane, Y=0) ---
-    positions = np.zeros((n_pts, 3), dtype=np.float32)
-    positions[:, 0] = all_pts_2d[:, 0].astype(np.float32)
-    positions[:, 2] = all_pts_2d[:, 1].astype(np.float32)
+    positions = np.zeros((n_total_pts, 3), dtype=np.float32)
+    positions[:, 0] = all_pts_2d[:, 0]
+    positions[:, 2] = all_pts_2d[:, 1]
+
     # Y=0 — placement.py will apply the world-space transform
 
     # --- Extract edges from faces ---
@@ -165,9 +180,10 @@ def triangulate_panel(
     edges = np.array(sorted(edge_set), dtype=np.int32)
 
     # --- UV coordinates: normalize 2D positions to [0,1]² ---
-    uvs = np.zeros((n_pts, 2), dtype=np.float32)
-    uvs[:, 0] = ((all_pts_2d[:, 0] - bb_min[0]) / extent[0]).astype(np.float32)
-    uvs[:, 1] = ((all_pts_2d[:, 1] - bb_min[1]) / extent[1]).astype(np.float32)
+    uvs = np.zeros((n_total_pts, 2), dtype=np.float32)
+    uvs[:, 0] = ((all_pts_2d[:, 0] - bb_min[0]) / extent[0])
+    uvs[:, 1] = ((all_pts_2d[:, 1] - bb_min[1]) / extent[1])
+
 
     return TriangulatedPanel(
         positions=positions,
@@ -175,4 +191,5 @@ def triangulate_panel(
         edges=edges,
         uvs=uvs,
         boundary_indices=boundary_indices,
+        original_vertex_mapping=np.array(old_to_new_mapping, dtype=np.int32),
     )

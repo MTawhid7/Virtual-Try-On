@@ -39,6 +39,13 @@ python -m scripts.visualize_phase4_garment_drape   # full garment-on-body GLBs
 # All outputs → storage/phase{N}_*.glb
 ```
 
+**Pattern verification and manual stitching (run from backend/):**
+```bash
+python -m scripts.interactive_stitcher --pattern data/patterns/tshirt.json  # 2D manual stitch editor
+python -m scripts.verify_dxf_import --pattern data/patterns/tshirt.json     # 3D diagnostic preview
+# 3D Controls: 1=body, 2=panels, 3=boundary, 4=stitches, SHIFT+Click=Vertex ID
+```
+
 **Body analysis & panel preview (run from backend/):**
 ```bash
 python -m scripts.analyze_body       # generate/update mannequin_profile.json
@@ -145,23 +152,18 @@ Garment panels must start **outside** these bounds AND be **wide enough** for se
 
 ## Current State
 
-**Sprint 2 Layer 3b-Extended: Phases 1–4 complete. Body analysis validated. Panel shape under iteration.**
+**Sprint 2 Layer 3b-Extended: Phases 1–4 complete. T-Shirt DXF Pipeline functional. Interactive Stitching Finalized.**
 
 - **195/195 tests passing.**
 - `mesh/triangulation.py`, `mesh/panel_builder.py`, `constraints/stitch.py` all implemented and unit-tested.
-- `scenes/garment_drape.py` implemented and integration-tested (12 tests pass at reduced resolution/frames).
-- Full-scene simulation: 540 particles, 42 stitch pairs, 480 frames → all 6 checks PASS.
-- Live visualizer enhanced with stitch line rendering, pause/step controls, per-frame diagnostics.
-- **Body Analysis v3**: Validated landmarks (neck, shoulder, armpit, chest, waist, hip) from `mannequin_profile.json`.
-- **Panel Preview v3**: Parametric tank top shape wrapping onto body — functional but shape not yet professional quality.
-- **Key insight**: CLO3D uses FLAT panel placement (not pre-wrapped). The panel SHAPE definition (Bézier curves from body measurements) is the bottleneck, not panel placement.
-
-**Next immediate tasks:**
-1. Implement Bézier-based panel outline generator (`pattern_generator.py`) using validated body measurements
-2. Refine tank top shape to match CLO3D reference (armhole curves, neckline scoop, strap width)
-3. Integrate refined panels into `garment_drape.py` with flat placement
-4. Phase 5: `data/patterns/tshirt.json` (4 panels: front bodice, back bodice, 2 sleeves)
-5. Sprint 3: FastAPI backend + Next.js frontend
+- `scenes/garment_drape.py` implemented and integration-tested.
+- **Interactive Stitcher**: 2D Matplotlib tool for manual seam definition. Successfully overrides heuristic failures.
+- **3D Verification**: Diagnostic preview with vertex ID inspector ([SHIFT]+Click).
+- **Cylindrical Wrapping**: Synchronized math (First Half = Front) for both arms. Fixed Z-depth centering to prevent torso penetration.
+- **Next immediate tasks:**
+  1. Execute full "Shrink & Sew" simulation for the t-shirt pattern.
+  2. Resolve small remaining alignment issues in the left sleeve's internal winding.
+  3. Start Sprint 3 (Web API Layer).
 
 **Performance note:** `body_drape` at 60×60 × 16 iterations + self-collision hash rebuild is intentionally slow — performance optimization is deferred. Do not optimize before Sprint 3.
 

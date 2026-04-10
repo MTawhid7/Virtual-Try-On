@@ -86,9 +86,81 @@ def _rotation_y(deg: float) -> NDArray[np.float64]:
     ], dtype=np.float64)
 
 
+def _cylindrical_wrap_sleeve(
+    world_pos: NDArray[np.float32],
+    placement: dict,
+) -> NDArray[np.float32]:
+    """
+    Replace the flat sleeve placement with a cylindrical pre-wrap around the arm.
+
+    After rotation_x_deg=-90 and translation, all sleeve vertices share the same
+    Z (= placement["position"][2]) and vary in X across the sleeve width.  The
+    underarm seam (left-most and right-most edges in u) therefore start ~sleeve_pw
+    apart, with the arm in between — body collision prevents closure.
+
+    This transform maps the flat sleeve into a tube whose circumference equals
+    sleeve_pw, centered on the arm.  Both ends of the underarm seam start at the
+    same 3-D point (~0 initial gap), so the stitch closes immediately.
+
+    Cylinder geometry (Y-axis):
+        angle   = 2π * u / sleeve_pw      (u = X offset from placement X origin)
+        world_x = arm_cx + r * sin(angle)
+        world_z = arm_cz - r * cos(angle)
+        world_y = unchanged
+    where r = sleeve_pw / (2π).
+    """
+    pts = world_pos.astype(np.float64).copy()
+
+    pos_x0 = float(placement["position"][0])   # X origin of the flat sleeve
+    u_vals  = pts[:, 0] - pos_x0               # u ∈ [0, sleeve_pw]
+    sleeve_pw = float(u_vals.max() - u_vals.min())
+    if sleeve_pw < 1e-6:
+        return world_pos
+
+    r = sleeve_pw / (2.0 * np.pi)
+
+    # Arm center: use body mid-Z (Front 0.20, Back -0.10 => Mid 0.05)
+    arm_cz = 0.05  
+    # Determine which arm (right vs left) from the sign of pos_x0
+    arm_cx = 0.25 if pos_x0 >= 0.0 else -0.25
+
+    u_norm  = (u_vals - u_vals.min()) / sleeve_pw   # [0, 1]
+    
+    # We want u=0 (inner armpit) to be our starting phase.
+    # For Right Arm (cx > 0), inner is at x = cx - r. 
+    # For Left Arm (cx < 0), inner is at x = cx + r.
+    # We want u=0.25 (the middle of the first half) to face the FRONT (+Z).
+    
+    if arm_cx > 0:
+        # Right Arm: Start at -90deg, rotate POSITIVE.
+        # u=0.25 -> angle = 0. sin=0, cos=1. Z = 0.05 - r (BACK). 
+        # Wait, we want FRONT (+Z). So we want cos to be -1.
+        # Let's use: angle = 2*pi*u + pi/2
+        # u=0: 90deg. sin=1, cos=0. x = cx+r (Outer). NO.
+        
+        # FINAL LOGIC:
+        # Right Arm: angle = -2*pi*u - pi/2
+        #   u=0: -90deg. sin=-1, cos=0. x = cx-r (inner). Correct.
+        #   u=0.25: -180deg. sin=0, cos=-1. z = 0.05+r (FRONT). Correct.
+        angle = -2.0 * np.pi * u_norm - (np.pi / 2.0)
+    else:
+        # Left Arm: inner is at x = cx + r. 
+        # Start at +90deg, rotate POSITIVE.
+        #   u=0: 90deg. sin=1, cos=0. x = cx+r (inner). Correct.
+        #   u=0.25: 180deg. sin=0, cos=-1. z = 0.05+r (FRONT). Correct.
+        angle = 2.0 * np.pi * u_norm + (np.pi / 2.0)
+
+    pts[:, 0] = arm_cx + r * np.sin(angle)
+    pts[:, 2] = arm_cz - r * np.cos(angle)
+    # pts[:, 1] (Y) unchanged — preserves cap height and cuff height
+
+    return pts.astype(np.float32)
+
+
 def _apply_placement(
     positions_local: NDArray[np.float32],
     placement: dict,
+    global_scale: float = 1.0,
 ) -> NDArray[np.float32]:
     """
     Transform panel vertices from local space to world space.
@@ -122,7 +194,13 @@ def _apply_placement(
         pts = pts @ _rotation_x(rot_x_deg).T   # apply X rotation first
 
     rotated = pts @ _rotation_y(rot_y_deg).T   # then Y rotation
-    world = rotated + translation               # broadcast translate
+    
+    rotated *= global_scale
+    body_center = np.array([0.0, 1.25, 0.0], dtype=np.float64)
+    direction = translation - body_center
+    translation_scaled = body_center + direction * global_scale
+    
+    world = rotated + translation_scaled               # broadcast translate
 
     return world.astype(np.float32)
 
@@ -133,63 +211,47 @@ def _find_edge_particles(
     v_end: int,
 ) -> NDArray[np.int32]:
     """
-    Find all boundary particle indices that lie along the edge from
-    polygon vertex v_start to polygon vertex v_end, sorted by position
-    along the edge.
+    Return particle indices along the polygon boundary from v_start to v_end,
+    walking in the shorter direction around the perimeter.
+
+    The previous chord-projection approach projected all particles onto the
+    straight line between the two endpoint vertices. For curved edges (armhole,
+    neckline) the chord cuts through the panel interior, capturing hundreds of
+    interior grid particles — wrong. The boundary walk is exact: it follows the
+    actual polygon outline, collecting only the original polygon vertices
+    (stored at positions[0..P-1] since boundary_indices = arange(P)).
 
     Args:
-        panel: TriangulatedPanel (local space, Y=0).
-        v_start: Index into the polygon outline (boundary_indices).
-        v_end:   Index into the polygon outline (boundary_indices).
+        panel:   TriangulatedPanel (local space, Y=0).
+        v_start: Polygon vertex index (start of edge).
+        v_end:   Polygon vertex index (end of edge).
 
     Returns:
-        (M,) int32 array of local particle indices along the edge,
-        ordered from v_start to v_end (inclusive at both ends).
+        (M,) int32 array of particle indices along the boundary, ordered
+        from v_start to v_end inclusive.
     """
-    # World positions of the two polygon boundary vertices
-    idx_start = int(panel.boundary_indices[v_start])
-    idx_end   = int(panel.boundary_indices[v_end])
+    n = len(panel.boundary_indices)
 
-    p_start = panel.positions[idx_start, [0, 2]].astype(np.float64)  # XZ
-    p_end   = panel.positions[idx_end,   [0, 2]].astype(np.float64)
+    start_mapped = int(panel.original_vertex_mapping[v_start])
+    end_mapped = int(panel.original_vertex_mapping[v_end])
 
-    edge_vec = p_end - p_start
-    edge_len = np.linalg.norm(edge_vec)
+    d_fwd = (end_mapped - start_mapped) % n
+    d_bwd = (start_mapped - end_mapped) % n
 
-    if edge_len < 1e-8:
-        return np.array([idx_start], dtype=np.int32)
+    if d_fwd <= d_bwd:
+        indices = [int(panel.boundary_indices[(start_mapped + k) % n])
+                   for k in range(d_fwd + 1)]
+    else:
+        indices = [int(panel.boundary_indices[(start_mapped - k) % n])
+                   for k in range(d_bwd + 1)]
 
-    edge_dir = edge_vec / edge_len
-
-    # Check every vertex: project onto edge direction, keep those near the segment
-    pts_xz = panel.positions[:, [0, 2]].astype(np.float64)  # (N, 2)
-    rel = pts_xz - p_start                                    # (N, 2)
-    t   = rel @ edge_dir                                       # scalar projection
-    # perpendicular distance to the edge line
-    perp = rel - np.outer(t, edge_dir)
-    dist_perp = np.linalg.norm(perp, axis=1)
-
-    # Tolerance: must capture at least the first interior grid column.
-    # 10% of edge length — for a 0.7m edge at resolution=20, this gives 0.07m,
-    # which includes the first grid column at ~0.04m from the boundary.
-    tol = edge_len * 0.10 + 1e-4
-
-    on_segment = (t >= -tol) & (t <= edge_len + tol) & (dist_perp < tol)
-    indices = np.where(on_segment)[0]
-
-    if len(indices) == 0:
-        # Fallback: return just the two endpoints
-        return np.array([idx_start, idx_end], dtype=np.int32)
-
-    # Sort by t (projection along edge direction)
-    t_vals = t[indices]
-    order = np.argsort(t_vals)
-    return indices[order].astype(np.int32)
+    return np.array(indices, dtype=np.int32)
 
 
 def build_garment_mesh(
     pattern_path: str | Path,
     resolution: int = 20,
+    global_scale: float = 1.0,
 ) -> GarmentMesh:
     """
     Load a pattern JSON and build a merged GarmentMesh.
@@ -227,7 +289,12 @@ def build_garment_mesh(
 
     for pspec in panel_specs:
         panel_local = triangulate_panel(pspec["vertices_2d"], resolution=resolution)
-        world_pos   = _apply_placement(panel_local.positions, pspec["placement"])
+        world_pos   = _apply_placement(panel_local.positions, pspec["placement"], global_scale=global_scale)
+        if "sleeve" in pspec["id"].lower():
+            # Force cylindrical wrap for ALL sleeves regardless of aspect ratio
+            # This is critical for the placement to clear the body and for
+            # the sewing heuristic to calculate non-crossed distances properly.
+            world_pos = _cylindrical_wrap_sleeve(world_pos, pspec["placement"])
         panels_local.append(panel_local)
         panels_world_pos.append(world_pos)
         panel_ids.append(pspec["id"])
@@ -250,8 +317,11 @@ def build_garment_mesh(
 
     positions = np.concatenate(all_positions, axis=0).astype(np.float32)
     faces     = np.concatenate(all_faces,     axis=0).astype(np.int32)
-    edges     = np.concatenate(all_edges,     axis=0).astype(np.int32)
+    edges_raw = np.concatenate(all_edges,     axis=0).astype(np.int32)
     uvs       = np.concatenate(all_uvs,       axis=0).astype(np.float32)
+
+    # Use all edges provided by the high-quality triangulator
+    edges = edges_raw
 
     # --- Step 5: Resolve stitch definitions → global index pairs ---
     panel_id_to_idx = {pid: i for i, pid in enumerate(panel_ids)}
@@ -267,22 +337,19 @@ def build_garment_mesh(
         local_b = _find_edge_particles(panels_local[pb_idx], eb[0], eb[1])
 
         # Match by relative position along edge (zip shortest)
-        n_match = min(len(local_a), len(local_b))
-        if n_match == 0:
+        n_pts = min(len(local_a), len(local_b))
+        if n_pts == 0:
             continue
 
-        # Subsample the longer list to match the shorter one
-        if len(local_a) != len(local_b):
-            idx_a = np.round(np.linspace(0, len(local_a) - 1, n_match)).astype(int)
-            idx_b = np.round(np.linspace(0, len(local_b) - 1, n_match)).astype(int)
-            local_a = local_a[idx_a]
-            local_b = local_b[idx_b]
+        # Subsample linearly
+        idx_a = np.linspace(0, len(local_a) - 1, n_pts, dtype=int)
+        idx_b = np.linspace(0, len(local_b) - 1, n_pts, dtype=int)
 
         off_a = panel_offsets[pa_idx]
         off_b = panel_offsets[pb_idx]
 
-        for la, lb in zip(local_a, local_b):
-            stitch_pairs_list.append((int(la) + off_a, int(lb) + off_b))
+        for i in range(n_pts):
+            stitch_pairs_list.append((int(local_a[idx_a[i]]) + off_a, int(local_b[idx_b[i]]) + off_b))
 
     stitch_pairs = (
         np.array(stitch_pairs_list, dtype=np.int32)

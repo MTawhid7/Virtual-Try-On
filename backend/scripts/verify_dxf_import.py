@@ -1,12 +1,11 @@
 """
-Panel Preview v5 — Smooth Bézier panels with flat placement.
+DXF Validation Preview — Validates imported CLO3D DXF patterns.
 
-Generates panels, builds garment mesh, and visualizes with Taichi GGUI.
-Includes verification diagnostics: panel outlines, body overlap check,
-stitch gap measurements.
+Loads imported pattern JSON, builds garment mesh, and visualizes with Taichi GGUI.
+Provides verification diagnostics for flat panel placement and stitch gaps.
 
 Usage:
-    python -m scripts.preview_panels
+    python -m scripts.verify_dxf_import
 
 Controls:
     1 = body  |  2 = panels  |  3 = boundary edges  |  4 = stitch lines
@@ -15,7 +14,6 @@ Controls:
 
 import os
 import sys
-import json
 import numpy as np
 import trimesh
 import taichi as ti
@@ -24,34 +22,20 @@ backend_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if backend_dir not in sys.path:
     sys.path.insert(0, backend_dir)
 
-from simulation.mesh.pattern_generator import generate_tank_top
 from simulation.mesh.panel_builder import build_garment_mesh
 
-
-def preview_panels():
-    profile_path = os.path.join(backend_dir, "data/bodies/mannequin_profile.json")
+def verify_dxf(pattern_path: str):
     body_glb = os.path.join(backend_dir, "data/bodies/mannequin_physics.glb")
-    output_json = os.path.join(backend_dir, "data/patterns/tank_top_v2.json")
 
     print("═" * 60)
-    print("  Panel Preview v5 — Smooth Bézier + Flat Placement")
+    print("  DXF Import Verification")
     print("═" * 60)
-
-    # --- Generate pattern ---
-    pattern = generate_tank_top(profile_path, fit="relaxed")
-
-    with open(output_json, "w") as f:
-        json.dump(pattern, f, indent=2)
-    print(f"\n  Saved: {output_json}")
 
     # --- Build garment mesh ---
-    print("\n  Building garment mesh...")
-    tmp_json = os.path.join(backend_dir, "data/patterns/_tmp_preview.json")
-    with open(tmp_json, "w") as f:
-        json.dump(pattern, f)
+    print(f"\n  Loading pattern: {os.path.basename(pattern_path)}")
 
     try:
-        garment = build_garment_mesh(tmp_json, resolution=25)
+        garment = build_garment_mesh(pattern_path, resolution=25)
         print(f"  ✓ Garment: {len(garment.positions)} vertices, "
               f"{len(garment.faces)} triangles, "
               f"{len(garment.stitch_pairs)} stitch pairs")
@@ -60,13 +44,10 @@ def preview_panels():
         import traceback
         traceback.print_exc()
         return
-    finally:
-        if os.path.exists(tmp_json):
-            os.remove(tmp_json)
 
     # --- Verification diagnostics ---
-    print("\n  ═══ Verification Checks ═══")
-
+    print("\n  ═══ Panel Summary ═══")
+    
     # Check 1: Panel bounding box
     for i, pid in enumerate(garment.panel_ids):
         start = garment.panel_offsets[i]
@@ -91,36 +72,36 @@ def preview_panels():
         print(f"    Min:    {gaps.min()*100:.1f}cm")
         print(f"    Max:    {gaps.max()*100:.1f}cm")
 
-    # Check 3: Body overlap check
     body = trimesh.load(body_glb, force="mesh")
-    body_x_range = [body.vertices[:, 0].min(), body.vertices[:, 0].max()]
-    body_y_range = [body.vertices[:, 1].min(), body.vertices[:, 1].max()]
-    body_z_range = [body.vertices[:, 2].min(), body.vertices[:, 2].max()]
-    print(f"\n  Body extent:")
-    print(f"    X: [{body_x_range[0]:.3f}, {body_x_range[1]:.3f}]")
-    print(f"    Y: [{body_y_range[0]:.3f}, {body_y_range[1]:.3f}]")
-    print(f"    Z: [{body_z_range[0]:.3f}, {body_z_range[1]:.3f}]")
-
-    front_z = garment.positions[:, 2].max()
-    back_z = garment.positions[:, 2].min()
-    print(f"    Front panel Z={front_z:.3f} vs body front Z={body_z_range[1]:.3f} "
-          f"→ clearance: {(front_z - body_z_range[1])*100:.1f}cm {'✓' if front_z > body_z_range[1] else '✗ OVERLAP!'}")
-    print(f"    Back panel Z={back_z:.3f} vs body back Z={body_z_range[0]:.3f} "
-          f"→ clearance: {(body_z_range[0] - back_z)*100:.1f}cm {'✓' if back_z < body_z_range[0] else '✗ OVERLAP!'}")
 
     # --- GGUI Visualization ---
     print(f"\n  ═══ Launching Viewer ═══")
     print(f"  1=body  2=panels  3=boundary  4=stitches  5=wireframe  Q=quit")
+    print(f"  LMB drag = orbit around body  |  Scroll = zoom  |  RMB drag = pan")
     print()
 
     ti.init(arch=ti.cpu)
-    window = ti.ui.Window("Panel Preview v5", (1280, 900))
+    window = ti.ui.Window("DXF Preview", (1280, 900))
     canvas = window.get_canvas()
     canvas.set_background_color((0.08, 0.08, 0.10))
     scene = window.get_scene()
     camera = ti.ui.Camera()
-    camera.position(0.0, 1.10, 1.8)
-    camera.lookat(0.0, 1.05, 0.16)
+
+    # Orbit camera state — body centre is the fixed look-at target
+    TARGET   = np.array([0.0, 1.05, 0.16], dtype=np.float64)
+    orbit    = {"azim": 0.0, "elev": 10.0, "radius": 1.8}   # degrees, metres
+    pan      = {"x": 0.0, "y": 0.0}                          # world-space pan
+    prev_pos = {"x": None, "y": None, "btn": None}
+
+    def _orbit_position():
+        az  = np.radians(orbit["azim"])
+        el  = np.radians(orbit["elev"])
+        r   = orbit["radius"]
+        px  = r * np.cos(el) * np.sin(az)
+        py  = r * np.sin(el)
+        pz  = r * np.cos(el) * np.cos(az)
+        eye = TARGET + np.array([px, py, pz]) + np.array([pan["x"], pan["y"], 0.0])
+        return eye.tolist()
 
     # Body
     body_v = ti.Vector.field(3, dtype=ti.f32, shape=len(body.vertices))
@@ -140,12 +121,13 @@ def preview_panels():
         for i in range(3):
             e = tuple(sorted([f[i], f[(i + 1) % 3]]))
             edge_set.add(e)
-    wire_pts = np.zeros((len(edge_set) * 2, 3), dtype=np.float32)
-    for i, (a, b) in enumerate(edge_set):
-        wire_pts[i * 2] = garment.positions[a]
-        wire_pts[i * 2 + 1] = garment.positions[b]
-    wire_field = ti.Vector.field(3, dtype=ti.f32, shape=len(wire_pts))
-    wire_field.from_numpy(wire_pts)
+    if edge_set:
+        wire_pts = np.zeros((len(edge_set) * 2, 3), dtype=np.float32)
+        for i, (a, b) in enumerate(edge_set):
+            wire_pts[i * 2] = garment.positions[a]
+            wire_pts[i * 2 + 1] = garment.positions[b]
+        wire_field = ti.Vector.field(3, dtype=ti.f32, shape=len(wire_pts))
+        wire_field.from_numpy(wire_pts)
 
     # Boundary edges (edges belonging to only 1 face)
     from collections import Counter
@@ -174,9 +156,10 @@ def preview_panels():
         stitch_field = ti.Vector.field(3, dtype=ti.f32, shape=len(stitch_pts))
         stitch_field.from_numpy(stitch_pts)
 
-    show = {"body": True, "panels": True, "boundary": True, "stitch": True, "wire": False}
+    show = {"body": False, "panels": True, "boundary": True, "stitch": True, "wire": False}
 
     while window.running:
+        # --- Key events ---
         if window.get_event(ti.ui.PRESS):
             k = window.event.key
             if k == '1': show["body"] = not show["body"]
@@ -185,7 +168,37 @@ def preview_panels():
             elif k == '4': show["stitch"] = not show["stitch"]
             elif k == '5' or k == ti.ui.SPACE: show["wire"] = not show["wire"]
 
-        camera.track_user_inputs(window, movement_speed=0.03, hold_key=ti.ui.RMB)
+        # --- Orbit camera: LMB = rotate, RMB = pan, scroll = zoom ---
+        mouse_x, mouse_y = window.get_cursor_pos()
+
+        lmb = window.is_pressed(ti.ui.LMB)
+        rmb = window.is_pressed(ti.ui.RMB)
+        cur_btn = "lmb" if lmb else ("rmb" if rmb else None)
+
+        if cur_btn and prev_pos["btn"] == cur_btn and prev_pos["x"] is not None:
+            dx = mouse_x - prev_pos["x"]
+            dy = mouse_y - prev_pos["y"]
+            if cur_btn == "lmb":
+                orbit["azim"] -= dx * 200.0
+                orbit["elev"]  = float(np.clip(orbit["elev"] + dy * 100.0, -80, 80))
+            else:  # RMB = pan
+                pan["x"] -= dx * orbit["radius"] * 0.8
+                pan["y"] += dy * orbit["radius"] * 0.8
+
+        prev_pos["x"] = mouse_x if cur_btn else None
+        prev_pos["y"] = mouse_y if cur_btn else None
+        prev_pos["btn"] = cur_btn
+
+        # Scroll = zoom
+        if window.is_pressed("w"): orbit["radius"] = max(0.3, orbit["radius"] - 0.02)
+        if window.is_pressed("s"): orbit["radius"] = min(5.0, orbit["radius"] + 0.02)
+
+        eye = _orbit_position()
+        target = (TARGET + np.array([pan["x"], pan["y"], 0.0])).tolist()
+        camera.position(*eye)
+        camera.lookat(*target)
+        camera.up(0, 1, 0)
+
         scene.set_camera(camera)
         scene.ambient_light((0.35, 0.35, 0.35))
         scene.point_light(pos=(2, 5, 2), color=(1.0, 1.0, 1.0))
@@ -199,12 +212,48 @@ def preview_panels():
             scene.lines(bound_field, width=3.0, color=(1.0, 0.3, 0.3))
         if show["stitch"] and has_stitches:
             scene.lines(stitch_field, width=2.0, color=(0.2, 1.0, 0.3))
-        if show["wire"]:
+        if show["wire"] and edge_set:
             scene.lines(wire_field, width=1.0, color=(1.0, 1.0, 1.0))
+
+        # --- Simple point-picker for manual ID inspection ---
+        if window.is_pressed(ti.ui.LMB) and window.is_pressed(ti.ui.SHIFT):
+            # Find closest vertex in 3D to central ray (approximation)
+            cam_pos = np.array(eye)
+            cam_look = np.array(target)
+            fwd = cam_look - cam_pos
+            fwd /= np.linalg.norm(fwd)
+            
+            # For simplicity, we just find the closest vertex to the camera target
+            # since the user orbits around what they want to see.
+            dists = np.linalg.norm(garment.positions - cam_look, axis=1)
+            closest_idx = np.argmin(dists)
+            if dists[closest_idx] < 0.1:
+                # Find which panel this belongs to
+                p_id = "unknown"
+                l_idx = -1
+                for i, pid in enumerate(garment.panel_ids):
+                    start = garment.panel_offsets[i]
+                    end = garment.panel_offsets[i+1] if i+1 < len(garment.panel_offsets) else len(garment.positions)
+                    if start <= closest_idx < end:
+                        p_id = pid
+                        l_idx = closest_idx - start
+                        break
+                
+                window.GUI.begin("Vertex Inspector", 0.05, 0.05, 0.2, 0.1)
+                window.GUI.text(f"Panel: {p_id}")
+                window.GUI.text(f"Global ID: {closest_idx}")
+                window.GUI.text(f"Local ID: {l_idx}")
+                window.GUI.end()
 
         canvas.scene(scene)
         window.show()
 
 
 if __name__ == "__main__":
-    preview_panels()
+    import argparse
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--pattern", type=str, default="data/patterns/tshirt.json")
+    args = parser.parse_args()
+    
+    path = os.path.abspath(os.path.join(backend_dir, args.pattern))
+    verify_dxf(path)

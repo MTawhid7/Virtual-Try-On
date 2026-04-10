@@ -50,7 +50,8 @@ class TestTriangulatePanelBasic:
 
     def test_boundary_indices(self):
         panel = triangulate_panel(RECTANGLE, resolution=10)
-        assert len(panel.boundary_indices) == len(RECTANGLE)
+        assert len(panel.boundary_indices) >= len(RECTANGLE)
+        assert len(panel.original_vertex_mapping) == len(RECTANGLE)
         assert np.all(panel.boundary_indices < panel.positions.shape[0])
 
     def test_face_indices_in_range(self):
@@ -114,13 +115,16 @@ class TestTriangulatePanelGeometry:
         assert zs.max() <= 0.6 + 1e-5
 
     def test_boundary_vertices_match_polygon(self):
-        """The first P vertices must match the input polygon (lifted to 3D)."""
+        """The mapped vertices must match the input polygon (lifted to 3D)."""
         poly = RECTANGLE
         panel = triangulate_panel(poly, resolution=10)
         for i, (px, pz) in enumerate(poly):
-            vx = panel.positions[i, 0]
-            vz = panel.positions[i, 2]
+            mapped_idx = panel.original_vertex_mapping[i]
+            # Since triangulate_panel outputs mapped_idx which corresponds to the first N items in positions...
+            vx = panel.positions[mapped_idx, 0]
+            vz = panel.positions[mapped_idx, 2]
             assert abs(vx - px) < 1e-5, f"Boundary vertex {i}: X mismatch {vx} vs {px}"
+            assert abs(vz - pz) < 1e-5, f"Boundary vertex {i}: Z mismatch {vz} vs {pz}"
             assert abs(vz - pz) < 1e-5, f"Boundary vertex {i}: Z mismatch {vz} vs {pz}"
 
     def test_uv_boundary_corners(self):

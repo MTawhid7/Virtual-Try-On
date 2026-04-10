@@ -64,17 +64,6 @@ def run_garment_drape(
 
     fabric = FABRIC_PRESETS["cotton"]
 
-    config = SimConfig(
-        total_frames=480,
-        substeps=15,
-        solver_iterations=8,
-        damping=fabric.damping,
-        max_particles=1000,
-        collision_thickness=0.008,
-        friction_coefficient=fabric.friction,
-        air_drag=0.3,
-    )
-
     # --- Body mesh ---
     print("  Loading body mesh...")
     collider = BodyCollider.from_glb(
@@ -84,10 +73,28 @@ def run_garment_drape(
     )
     print(f"  Body proxy: {collider.spatial_hash.n_triangles} triangles\n")
 
+    config = SimConfig(
+        total_frames=600,
+        substeps=15,
+        solver_iterations=20,
+        damping=fabric.damping,
+        max_particles=50000,  # Ensure large buffer, actual size checked later
+        collision_thickness=0.008,
+        friction_coefficient=fabric.friction,
+        air_drag=0.3,
+        shrink_frames=150,
+        initial_scale=1.35,
+    )
+
     # --- Garment mesh ---
     print("  Building garment mesh from pattern JSON...")
-    garment = build_garment_mesh(pattern_path, resolution=resolution)
+    garment = build_garment_mesh(
+        pattern_path, 
+        resolution=resolution, 
+        global_scale=config.initial_scale,
+    )
     n_particles = garment.positions.shape[0]
+    config.max_particles = max(n_particles + 200, 1000)
     n_stitches = garment.stitch_pairs.shape[0]
     print(f"  Panels:          {garment.panel_ids}")
     print(f"  Particles:       {n_particles}")
@@ -127,7 +134,7 @@ def run_garment_drape(
         constraints=constraints,
         stretch_compliance=fabric.stretch_compliance,
         bend_compliance=fabric.bend_compliance,
-        stitch_compliance=1e-7,
+        stitch_compliance=1e-8,  # stiff stitches: closes large initial gaps
         max_stretch=fabric.max_stretch,
         max_compress=fabric.max_compress,
         stretch_damping=fabric.stretch_damping,

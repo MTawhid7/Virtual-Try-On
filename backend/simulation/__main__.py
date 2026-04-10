@@ -30,9 +30,14 @@ def main() -> None:
         "--output", "-o", type=str, default=None,
         help="Output path for .glb export. Defaults to storage/{scene}.glb",
     )
-    # Future args:
-    # parser.add_argument("--pattern", type=str, help="Pattern JSON file")
-    # parser.add_argument("--fabric", type=str, help="Fabric preset name")
+    parser.add_argument(
+        "--pattern", "-p", type=str, default=None,
+        help="Pattern JSON path for garment_drape scene (relative to backend/ or absolute).",
+    )
+    parser.add_argument(
+        "--resolution", "-r", type=int, default=8,
+        help="Mesh triangulation resolution for garment_drape (default 8 for interactive speed).",
+    )
 
     args = parser.parse_args()
 
@@ -49,7 +54,10 @@ def main() -> None:
     elif args.scene == "body_drape":
         run_body_drape(visualize=args.visualize, output_path=output_path)
     elif args.scene == "garment_drape":
-        run_garment_drape(visualize=args.visualize, output_path=output_path)
+        kwargs = dict(visualize=args.visualize, output_path=output_path, resolution=args.resolution)
+        if args.pattern:
+            kwargs["pattern_path"] = args.pattern
+        run_garment_drape(**kwargs)
     else:
         print(f"Unknown scene: {args.scene}", file=sys.stderr)
         sys.exit(1)

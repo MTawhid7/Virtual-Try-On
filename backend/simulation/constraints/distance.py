@@ -90,9 +90,12 @@ class DistanceConstraints:
         n_edges: ti.i32,
         max_stretch: ti.f32,
         max_compress: ti.f32,
+        scale: ti.f32,
     ):
         """
         Hard strain-limit pass (Provot 1995 / Müller 2007).
+        
+        Uses scaled rest length: L₀ = self.rest_length[e] * scale.
 
         After the compliance-based distance projection, clamp each edge length
         to [L₀×(1−max_compress), L₀×(1+max_stretch)] with zero compliance
@@ -111,7 +114,7 @@ class DistanceConstraints:
             if w_sum < 1e-12:
                 continue
 
-            L0   = self.rest_length[e]
+            L0   = self.rest_length[e] * scale
             diff = positions[j] - positions[i]
             L    = diff.norm()
             if L < 1e-10:
@@ -182,6 +185,7 @@ class DistanceConstraints:
         n_edges: ti.i32,
         compliance: ti.f32,
         dt: ti.f32,
+        scale: ti.f32,
     ):
         """
         Project all distance constraints using XPBD.
@@ -214,7 +218,7 @@ class DistanceConstraints:
                 continue
 
             n_hat = diff / dist
-            C = dist - self.rest_length[e]
+            C = dist - (self.rest_length[e] * scale)
 
             # XPBD Lagrange multiplier update
             denom = wi + wj + alpha_tilde

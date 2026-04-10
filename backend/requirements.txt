@@ -4,6 +4,9 @@ numpy>=1.24.0
 trimesh[easy]>=4.0.0
 mapbox-earcut>=1.0.0
 fast-simplification>=0.1.7
+triangle>=20230923
+ezdxf>=1.1.0
+scipy>=1.11.0
 
 # Testing
 pytest>=7.0

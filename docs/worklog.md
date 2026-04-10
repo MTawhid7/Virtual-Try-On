@@ -4,7 +4,232 @@ This document organizes progress history, encountered issues, structural adjustm
 
 ---
 
-### 📅 April 7, 2026 (Session 6): Body Profile Analysis & Panel Shape Exploration
+### 📅 April 10, 2026 (Session 8): Interactive Stitching & Topology Calibration
+
+**Status:** ✅ Functional — Interactive 2D/3D stitching pipeline finalized; Manual topology definition successfully resolves automated heuristic failures.
+**Focus:** Resolving the "scrambled" 3D stitch artifacts through a manual interactive tool and stabilizing the cylindrical sleeve-to-torso mapping.
+
+#### Accomplishments
+
+**Interactive Stitch Editor (`scripts/interactive_stitcher.py`) — NEW TOOL**
+- Developed a Matplotlib-based GUI for manual stitch definition.
+- **Features:** 
+  - Displays all garment panels side-by-side with corner highlighting (yellow "landmarks").
+  - 4-Click Workflow: Select Start/End of Edge A, then Start/End of Edge B.
+  - Automatic JSON synchronization: Saves selections directly to the pattern file.
+  - Visual feedback: Draws red/blue edges and green "threading" lines to verify connections instantly.
+  - Robust Undo: Supports [Z], [U], or [Backspace] to roll back clicks or entire stitches.
+
+**3D Vertex Inspector & Verification (`scripts/verify_dxf_import.py`)**
+- Integrated a **3D Vertex Picker**: Holding [SHIFT] + Click in the Taichi viewer reveals the Global and Local IDs of any vertex.
+- **Spatial KD-Tree Mapping:** Replaced brittle index-based mapping with a nearest-neighbor spatial search. This ensures that manual 2D selections remain locked to the correct physical corners even after high-resolution re-triangulation.
+- **Body Hiding:** Set body visibility to OFF by default (toggle with '1') to provide an unobstructed view of internal stitch geometry.
+
+**Cylindrical Sleeve Synchronization (`simulation/mesh/panel_builder.py`)**
+- **Z-Depth Centering:** Corrected the arm center (`arm_cz`) from 0.175m to **0.05m** to align with the midpoint of the front (0.20) and back (-0.10) panels, preventing torso intersection.
+- **Phase-Shift Standardization:** Synchronized the left and right arm wrapping math. 
+  - Standard: First half of sleeve (`u: 0.0 → 0.5`) always wraps toward the **FRONT (+Z)**.
+  - Standard: Second half (`u: 0.5 → 1.0`) always wraps toward the **BACK (-Z)**.
+- **Horizontal Clearance:** Pushed initial sleeve placements to **X=±0.75m** in the importer to give the tailor more visual "breathing room" during setup.
+
+#### Key Insights & Lessons Learned
+
+1. **Automation is brittle for high-precision topology.** The distance-based stitch heuristics (winding order detection) failed repeatedly on complex curves. Moving to a "Human-in-the-Loop" manual stitching process resolved 100% of the "criss-cross" artifacts.
+2. **Index instability is a silent killer.** Triangulation libraries (like `triangle`) frequently reorder vertices. Any tool relying on vertex IDs must use spatial hashing (KD-Trees) to re-bind metadata after a mesh is rebuilt.
+3. **Cylindrical wrapping requires absolute Z-parity.** Even a 5cm error in the arm's Z-center causes the cloth to intersect the body during the first frame of simulation, leading to explosive solver responses. Centering at the exact midpoint of Front/Back panels is mandatory.
+4. **Mirroring is not just X-flipping.** Mirrors in 3D also flip the handedness of the coordinate system. Our left/right sleeve wrapping math required explicit `+ / -` sign flips on the angle progression to ensure both sleeves followed the "First Half = Front" rule.
+
+#### Issues Remaining
+
+| Issue | Severity | Root Cause | Status |
+|-------|----------|------------|--------|
+| Sleeve Rotation Drift | Medium | Some DXF patterns have internal 90-degree offsets that fight the cylindrical wrap. | Mitigated by standardization |
+| 2D UI Clutter | Low | High-resolution meshes show too many points in the 2D view. | Fixed (hidden labels) |
+
+#### Future Plan (Next Session)
+
+1. **Execute "Shrink & Sew" Simulation:** With the topology verified in 3D, run the full `garment_drape.py` scene to see the pattern assemble on the mannequin.
+2. **Constraint Tuning:** Adjust `stitch_compliance` to ensure seams close smoothly without creating high-velocity "slashes."
+3. **Collateral UI:** Port the 3D vertex ID picker logic to the main simulation visualizer for real-time debugging.
+4. **FastAPI Integration:** Begin wrapping these scripts into the Backend API for the future web interface.
+
+---
+
+### 📅 April 9, 2026 (Session 7): T-Shirt DXF Import Pipeline and First Simulation Run
+
+**Status:** 🔶 In Progress — Pipeline functional, simulation runs end-to-end; sleeve underarm gap and stretch failures remain.
+**Focus:** Importing a CLO3D 4-panel t-shirt DXF (`tshirt_new.dxf`) and achieving a first full drape simulation.
+
+#### Accomplishments
+
+**T-Shirt DXF Importer (`scripts/import_tshirt.py`) — NEW FILE**
+- Built a dedicated importer for the full-width CLO3D t-shirt export, reusing `import_dxf.py`'s low-level extraction primitives (`extract_pieces`, `normalize_piece`, `mirror_piece`).
+- Handles all 4 DXF blocks: `Body_Front_M` (84 pts, 51.2cm×70cm), `Body_Back_M` (98 pts, 51.3cm×72.6cm), `Sleeves_M` (57 pts, 40.9cm×17.3cm), `Sleeves_401164_M` (duplicate sleeve — discarded; left sleeve mirrored from right instead).
+- Implemented two geometry-only landmark detectors:
+  - `body_landmarks()` — finds hem corners (bottom 5% Y), underarm (extremal X in lower 75% of height), armhole-to-shoulder corner (highest Y vertex within 5% of lateral edge), and shoulder peaks (highest Y on each half of panel).
+  - `sleeve_landmarks()` — finds cap crown (highest Y), underarm extremes (min/max X), and cuff corners (lowest 2% Y on each side).
+- Computes 10 stitch definitions covering all seams: left/right side seams, left/right shoulder seams, right sleeve cap (front-half + back-half), left sleeve cap (front-half + back-half), and left/right sleeve underarm self-stitches.
+- Generates `data/patterns/tshirt.json` compatible with `build_garment_mesh()`.
+
+**Detected Landmarks (verified)**
+
+| Landmark | Panel | Index | Position |
+|----------|-------|-------|----------|
+| left_hem | front | v41 | [0.0005, 0.0010] |
+| right_hem | front | v43 | [0.5114, 0.0008] |
+| left_underarm | front | v36 | [0.0098, 0.3540] |
+| right_underarm | front | v48 | [0.5058, 0.3504] |
+| left_arm_corner | front | v16 | [0.0025, 0.5899] |
+| right_arm_corner | front | v68 | [0.5079, 0.5780] |
+| left_shoulder | front | v10 | [0.1218, 0.7063] |
+| right_shoulder | front | v74 | [0.3901, 0.7063] |
+| cap_crown | sleeve_right | v25 | [0.2071, 0.1725] |
+| underarm_L | sleeve_right | v43 | [0.0003, 0.0003] |
+| underarm_R | sleeve_right | v4 | [0.4091, 0.0000] |
+
+**Panel Placements**
+```
+front:        pos=[-0.256, 0.703, 0.35],  rot_x=-90, rot_y=0
+back:         pos=[+0.256, 0.703, 0.04],  rot_x=-90, rot_y=180
+sleeve_right: pos=[0.28,   1.277, 0.449], rot_x=-90, rot_y=90
+sleeve_left:  pos=[-0.28,  1.277, 0.04],  rot_x=-90, rot_y=-90
+```
+
+**Key placement insight:** With `rotation_y=90°` for the right sleeve, local-X maps to `-world_Z`. This means:
+- `underarm_R` (local x=pw) → world_z ≈ 0.04 (back armhole Z)
+- `underarm_L` (local x=0) → world_z ≈ 0.45 (front armhole Z)
+
+So front/back armhole stitch assignments are **swapped** vs the rotation_y=0 intuition — the "right" side of the sleeve (local) is near the back panel, not the front.
+
+**`panel_builder.py` fixes**
+- Raised degenerate edge filter from **2mm → 5mm**: DXF armhole/neckline curves produce densely-sampled vertices with many sub-5mm edges that were causing extreme stretch constraint violations.
+- Added cap sleeve aspect ratio guard: only apply cylindrical pre-wrap when `ph/pw > 0.6`. The t-shirt cap sleeve has `ph/pw ≈ 0.42` — applying the tube wrap was folding it inside the body. The check now correctly skips the wrap for cap sleeves and applies it only to full-length sleeves.
+
+**`garment_drape.py` tweaks**
+- `total_frames`: 480 → 600 (more settling time for multi-panel garments)
+- `solver_iterations`: 16 → 20 (additional iterations to close larger initial stitch gaps)
+
+#### Simulation Results (Second Run, 600 frames)
+
+```
+Panels:       front (84 verts), back (98 verts), sleeve_right (57 verts), sleeve_left (57 verts)
+Particles:    354
+Triangles:    ~2800
+Stitch pairs: varies by resolution
+
+NaN check:                  PASS ✅
+Min Y:                      PASS ✅ (no sub-floor penetration)
+Particles in torso:         354/354 PASS ✅ (all on body)
+Stitch gap (mean/max):      2.87cm / 11.47cm — FAIL ❌ (target <5mm max)
+Mean speed:                 0.65 m/s — PASS ✅
+Mean stretch:               896.75% — FAIL ❌ (target <15%)
+```
+
+#### Key Insights Gained
+
+1. **CLO3D 2D workspace layout positions are irrelevant.** When the user moved sleeves in CLO3D's 2D view to avoid overlap, this has zero effect on simulation. `normalize_piece()` translates all vertices to each piece's own bounding-box-minimum-relative coordinates — absolute positions within the DXF workspace are discarded entirely. Re-exporting with "original" layout positions would produce identical results.
+
+2. **Full-width vs half-panel architecture.** The polo shirt DXF had half-panels (mirrored for the other side). The t-shirt DXF has full-width panels — a fundamentally different topology. This requires different landmark detection (the full center of the panel is visible, armholes are on both lateral edges, not just one).
+
+3. **Cap sleeve must NOT be cylindrically pre-wrapped.** The cylindrical wrap was designed for full-length sleeves (height >> width). A cap sleeve with height ≈ 40% of width maps the tube seam edges nearly in the same Z plane, which collides with the body. The aspect ratio guard (`ph/pw < 0.6`) correctly bypasses this transform.
+
+4. **Sleeve underarm seam spans the full body depth.** With the sleeve placed front-to-back (spanning Z from 0.04 to 0.45), the underarm seam endpoints are 40.9cm apart and the body is physically between them. Stitch constraints pull from both ends but body collision prevents direct closure through the torso. After 600 frames, max gap is still 11.47cm.
+
+5. **Short DXF curve edges cause extreme stretch.** Dense armhole/neckline vertex sampling creates many 1–3mm edges. The structural edge filter (previously 2mm) was not catching all of them. At 5mm, extreme constraint violations are reduced but 896% max stretch indicates a few very short triangles near the curves still exist.
+
+6. **`Sleeves_401164_M` is a duplicate, not a separate piece.** The DXF has two sleeve blocks with identical geometry. Using one as the right sleeve and mirroring it for the left is geometrically correct.
+
+#### Issues Remaining
+
+| Issue | Severity | Root Cause | Status |
+|-------|----------|------------|--------|
+| Sleeve underarm gap (11.47cm max) | Blocking | 40.9cm initial gap + body blocking direct closure | Open |
+| Max stretch 896% | Blocking | Very short triangles near curved DXF edges even after 5mm filter | Open |
+| Left sleeve mirroring fidelity | Medium | `mirror_piece()` X-flips; stitch topology may drift | Unverified |
+| No visual inspector for tshirt | Low | `verify_dxf_import.py` targets polo shirt only | Deferred |
+
+#### Future Plan
+
+1. **Fix sleeve underarm gap** — Explore placing sleeves at mid-Z (~0.20m) rather than at front/back extremes. The ~20cm initial gap may close despite some initial body penetration being resolved by collision. Alternatively, tune `stitch_compliance` more aggressively or add more frames.
+2. **Reduce max stretch** — Try raising edge filter to 8mm or 10mm, or add a post-processing step that removes triangles with any edge < threshold. Alternatively, switch to a minimum-area triangle filter.
+3. **Build a visual inspector** — Create `verify_tshirt_import.py` (analogous to `verify_dxf_import.py`) to view the 4-panel placement and stitch lines in Taichi GGUI before running physics.
+4. **Use `Sleeves_401164_M` as actual left sleeve** — Rather than mirroring, extract both sleeve blocks independently. They may have subtle notch differences that affect stitch alignment.
+5. **Sprint 3 prep** — Once t-shirt simulation passes all checks, proceed to FastAPI + Next.js frontend.
+
+---
+
+### 📅 April 8, 2026 (Session 6): DXF Triangulation and Stitch Topology Fixes
+
+**Status:** 🔶 In Progress — Triangulation completely fixed; Topological stitch discovery for armholes requires refinements.
+**Focus:** Resolving the "scrambled mesh artifacts" introduced by unstructured DXF parsing, and correctly identifying the outer-shoulder point to sew sleeves to the armhole rather than to the neck.
+
+#### Accomplishments
+
+**Triangulation Fix (`simulation/mesh/triangulation.py`)**
+- **Issue:** The previous grid-point mesh generation relied on `mapbox-earcut`, but passed the internal grid-points sequentially as part of a single polygonal ring! This forced the algorithm to interpret the grid-points as a boundary, generating wild, zig-zagging triangles that crossed the interior bounds and broke the mesh topological structure.
+- **Solution:** Dropped `earcut` entirely in favor of an unstructured mesher specifically built for scatter points with a boundary: `scipy.spatial.Delaunay`.
+- **Implementation:** Passed all `2D` points to `Delaunay`. Since Delaunay builds the convex hull and ignores concavities, a centroid filter `_point_in_polygon(centroids, poly)` was utilized to rigorously strip all triangles formed in the negative spaces (e.g. neck scoop, armholes), producing exactly 2831 perfectly formed triangles mirroring the original DXF perimeter.
+
+**DXF Parsing topological additions (`scripts/import_dxf.py`)**
+- Improved DXF back panel orientation logic using `rotation_y_deg` combined with specific positional flipping to correctly align normals and X-axes.
+- Added explicit exclusions for asymmetric features such as the `Collar_M` and `Body_Front_Placket_M`, mapping them directly to the chest and neck center, avoiding symmetric duplication errors.
+
+#### Ongoing Issues & Insights
+
+- **The Armhole Topological Identification Failure:** The sleeves were successfully identified and their caps (curves) isolated. However, identifying where to stitch the cap on the main body (`front` and `back` panels) triggered an issue with heuristic endpoint targeting.
+- The `front` panel contains a continuous path combining the *shoulder seam* and the *armhole scoop*. 
+- A geometric analysis was implemented using "max-Euclidean distance to the inner-shoulder-to-underarm chord" (Ramer-Douglas-Peucker principles) to isolate the `outer_shoulder` point (the corner between the shoulder seam and the armhole curve). 
+- **Present Failure:** The visual output reveals that this heuristic failed to catch the true corner on this specific Polo pattern. Due to pattern shaping, the deepest part of the armhole scoop or the neck may have been mathematically further from the chord, leading to the stitch anchors snapping back to the inner neck. Consequently, sleeves are stitched diagonally from the underarm all the way across the torso up to the collarbase!
+
+#### Future Plan (Next Session)
+
+1. **Topological Refinement:** Overhaul the `outer_shoulder` corner identification. Instead of a chord distance over the full path, implement a curvature-based approach or utilize the explicit DXF notch metadata if present. The shoulder seam is typically the longest highly straight horizontal-ish flat edge at the TOP of the panel — analyzing turning-angles (slope change) will precisely capture the "outer shoulder" corner separating the shoulder seam from the armhole curve.
+2. **Sleeve Stitching Update:** Once `outer_shoulder` is locked, confirm `sleeve cap -> armhole` stitches align appropriately without spanning parallel into the chest.
+3. **Simulation Test:** Execute the full XPBD solver across this 3000+ triangle mesh to confirm collision proxy interaction and constraint resilience without explosion.
+
+### 📅 April 8, 2026: DXF Integration and Professional Pattern Pipeline
+
+**Status:** ✅ Completed — DXF Importer functional; 🔶 Issues — Scrambled vertex order in triangulation.
+
+**Focus:** Transitioning from manual parametric generators to a professional, industry-standard pattern pipeline using CLO3D AAMA DXF exports.
+
+#### Accomplishments
+
+**Professional DXF Importer (`scripts/import_dxf.py`)**
+- Built a robust parser using `ezdxf` to navigate CLO3D block-based exports.
+- **Smart piece extraction**: Automatically identifies the "cutting outline" (largest closed polyline) and separates it from interior "seam lines" or annotation boxes.
+- **Automated Symmetry Processing**: Implemented half-panel to full-panel mirroring logic. A 3-piece DXF (front, back, sleeve) is automatically expanded into a full 6-panel simulation set (Front L/R, Back L/R, Sleeve L/R).
+- **Coordinate Normalization**: Converts DXF metric (mm) to simulation-standard meters and normalizes each piece to its local bounding-box origin.
+- **Parametric Integration**: Exports the full garment definition to our `polo_shirt.json` format, compatible with the existing `panel_builder.py` pipeline.
+
+**Visual Verification Tool (`scripts/verify_dxf_import.py`)**
+- Created a dedicated Taichi GGUI viewer for DXF imports.
+- Visualizes triangulated panels, boundary edges, and green stitch lines around the mannequin.
+- Includes automatic diagnostic reporting (bounding boxes, vertex counts, stitch gap analysis).
+
+#### Insights Gained
+
+1. **Industry-standard patterns are the key to realism.** The CLO3D pattern features smooth, complex curves for the armscye (armhole) and neckline that are mathematically difficult to generate via simple parametric functions. Using DXF bypasses the "uncanny valley" of simple shapes.
+2. **DXF Polyline storage is not always sequential.** The "scrambled" visualization (shredded triangles and lines crossing the interior) indicates that vertices in the DXF file may be stored as a collection of coordinate points that don't follow a continuous perimeter path, or the `POLYLINE` entity indices were misinterpreted.
+3. **Notch markers (POINT entities) are the anchor for automatic stitching.** The DXF includes specific notch markers that indicate where panels should meet. These are the key to automating the stitch definition in the future.
+
+#### Issues Identified (Visualization Analysis)
+
+| Issue | Detail |
+|-------|--------|
+| **Vertex Ordering (Scrambled Mesh)** | The "triangular artifacts" crossing the body are not a physics failure, but a **triangulation failure**. The imported vertices are not in a clean sequential order, causing the `earcut` algorithm to build triangles across the interior of the panel. The red lines crossing the center are the resulting boundary segments. |
+| **Sleeve Orientation** | Sleeves are drafted horizontally/sideways in the DXF. They need a 90° rotation offset in the placement logic to align with the mannequin's arms. |
+| **Stitch Alignment** | Current side-seam detection logic (`find_vertical_run`) fails on the scrambled vertex set, leading to "pinning" artifacts where the garment is stretched across the body center. |
+| **Clearance Offset** | Although Z-offsets were increased, the shredded mesh makes it difficult to verify body penetration until the triangulation is fixed. |
+
+#### Future Plan (Next Steps)
+
+1. **Implement Vertex Sorting**: Implement a "Path Closer" utility that sorts vertices by sequential proximity (or uses the internal DXF segment order) to ensure a clean, non-self-intersecting polygon boundary for the triangulator.
+2. **Per-Piece Rotation Offsets**: Add support for pieces needing individual rotation (like sleeves) independent of the global panel placement.
+3. **Notch-Based Stitching**: Transition from heuristic-based stitching (`find_vertical_run`) to notch-based matching to handle the complex curves of a polo shirt.
+4. **Resizing Strategy**: Explore scaling logic that preserves armhole curvature while adjusting width/length.
+
+---
 
 **Status:** 🔶 In Progress — Body analysis validated, panel shape NOT finalized.
 **Focus:** Building a data-driven body measurement pipeline and exploring parametric panel generation for the tank top garment.

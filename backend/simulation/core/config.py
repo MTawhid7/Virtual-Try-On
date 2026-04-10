@@ -22,6 +22,10 @@ class SimConfig:
     gravity: float = -9.81           # m/s² (Y-down)
     damping: float = 0.98            # Velocity damping per substep (0–1)
 
+    # --- Dynamic Shrink Phase ---
+    shrink_frames: int = 150         # Number of frames to animate shrink (0 to disable)
+    initial_scale: float = 1.30      # Starting scale multiplier for sewing phase
+    
     # --- Collision (from Vestra tuning) ---
     collision_thickness: float = 0.005       # 5mm body push-out margin
     friction_coefficient: float = 0.3        # Tangential friction (body + self)
