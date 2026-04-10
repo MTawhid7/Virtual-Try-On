@@ -152,17 +152,18 @@ Garment panels must start **outside** these bounds AND be **wide enough** for se
 
 ## Current State
 
-**Sprint 2 Layer 3b-Extended: Phases 1–4 complete. T-Shirt DXF Pipeline functional. Interactive Stitching Finalized.**
+**Sprint 2 Layer 3b-Extended: Phases 1–4 complete. T-Shirt DXF Pipeline functional. Stitch Topology Fully Verified.**
 
 - **195/195 tests passing.**
 - `mesh/triangulation.py`, `mesh/panel_builder.py`, `constraints/stitch.py` all implemented and unit-tested.
 - `scenes/garment_drape.py` implemented and integration-tested.
 - **Interactive Stitcher**: 2D Matplotlib tool for manual seam definition. Successfully overrides heuristic failures.
-- **3D Verification**: Diagnostic preview with vertex ID inspector ([SHIFT]+Click).
+- **3D Verification**: Diagnostic preview with vertex ID inspector ([SHIFT]+Click). All 10 stitch lines verified correct in 3D preview.
 - **Cylindrical Wrapping**: Synchronized math (First Half = Front) for both arms. Fixed Z-depth centering to prevent torso penetration.
+- **Sleeve Stitch Fix**: `sleeve_left` stitches had front/back assignments swapped due to stale `rotation_y=-90°` comment in `import_tshirt.py`. Fixed in both `tshirt.json` and `import_tshirt.py`. Diagnostic: walk `_find_edge_particles` and assert edge max_z > +0.10 for `front` and min_z < -0.01 for `back`.
 - **Next immediate tasks:**
   1. Execute full "Shrink & Sew" simulation for the t-shirt pattern.
-  2. Resolve small remaining alignment issues in the left sleeve's internal winding.
+  2. Evaluate simulation quality (seam closure, interpenetration, shoulder alignment).
   3. Start Sprint 3 (Web API Layer).
 
 **Performance note:** `body_drape` at 60×60 × 16 iterations + self-collision hash rebuild is intentionally slow — performance optimization is deferred. Do not optimize before Sprint 3.

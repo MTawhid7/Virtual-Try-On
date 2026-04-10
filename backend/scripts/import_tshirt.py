@@ -266,19 +266,20 @@ def compute_tshirt_stitches(pieces: dict[str, PanelPiece]) -> list[dict]:
             "panel_b": "sleeve_right", "edge_b": [sr["cuff_R"], sr["underarm_R"]],
         },
 
-        # ── Left sleeve (rotation_y=-90°) ────────────────────────
-        # With rotation_y=-90°, local-x maps to +world_z:
-        #   underarm_L (local x=0)   → world_z ≈ back_z = 0.04  → near BACK armhole
-        #   underarm_R (local x=pw)  → world_z ≈ front_z = 0.45 → near FRONT armhole
-        {
-            "comment": "Left sleeve cap back-half → back local-right armhole",
-            "panel_a": "sleeve_left", "edge_a": [sl["underarm_L"], sl["cap_crown"]],
-            "panel_b": "back",        "edge_b": [br["right_underarm"], br["right_arm_corner"]],
-        },
+        # ── Left sleeve (rotation_y=0, same cylindrical wrap as right) ──────────
+        # With rotation_y=0, cylindrical wrap uses angle = 2π*u_norm + π/2:
+        #   underarm_L (u_norm=0) and underarm_R (u_norm=1) → inner armpit (Z≈0.05)
+        #   u_norm=0.25 → Z = arm_cz + r (FRONT) ← underarm_L→cap_crown is FRONT half
+        #   u_norm=0.75 → Z = arm_cz - r (BACK)  ← cap_crown→underarm_R is BACK half
         {
             "comment": "Left sleeve cap front-half → front left armhole",
-            "panel_a": "sleeve_left", "edge_a": [sl["cap_crown"],  sl["underarm_R"]],
+            "panel_a": "sleeve_left", "edge_a": [sl["underarm_L"], sl["cap_crown"]],
             "panel_b": "front",       "edge_b": [fr["left_underarm"],  fr["left_arm_corner"]],
+        },
+        {
+            "comment": "Left sleeve cap back-half → back local-right armhole",
+            "panel_a": "sleeve_left", "edge_a": [sl["cap_crown"],  sl["underarm_R"]],
+            "panel_b": "back",        "edge_b": [br["right_arm_corner"], br["right_underarm"]],
         },
         {
             "comment": "Left sleeve underarm seam (self)",

@@ -4,6 +4,62 @@ This document organizes progress history, encountered issues, structural adjustm
 
 ---
 
+### 📅 April 10, 2026 (Session 9): Sleeve Armhole Stitch Inversion Diagnosis & Fix
+
+**Status:** ✅ Fixed — Right sleeve (viewer perspective) stitch connections corrected; all 10 stitch lines verified correct in 3D preview.
+**Focus:** Diagnosing why one sleeve's front/back armhole stitches were swapped despite multiple manual attempts to override them through the interactive stitcher.
+
+#### Accomplishments
+
+**Bug Diagnosis: Left Sleeve (Code) Front/Back Inversion**
+- Identified the exact root cause through Z-coordinate analysis of every stitch edge after cylindrical wrapping.
+- The bug was in `scripts/import_tshirt.py` lines 269–287: a stale comment assumed `rotation_y=-90°` for the left sleeve, but the actual placement used `rotation_y=0`.
+- Under `rotation_y=0` + cylindrical wrap (`angle = 2π·u_norm + π/2`), the `underarm_L→cap_crown` half sweeps through **+Z (FRONT)** at u_norm=0.25, not BACK as the old comment claimed.
+
+**Naming Convention Clarification (Critical)**
+- Code naming is from the **wearer's perspective**: `sleeve_right` = body's right arm (appears on viewer's LEFT when facing the garment).
+- The user observing "right sleeve wrong" was referring to the **viewer's right** = code's `sleeve_left`.
+- This naming mismatch was a diagnostic trap. Both perspectives are now documented.
+
+**Z-Coordinate Verification Method**
+- Developed a diagnostic: after cylindrical wrap, walk `_find_edge_particles` for each stitch edge and record min/max world Z. The correct assignment:
+  - `panel_b: front` → edge's max_z must be > +0.10 (front-facing)
+  - `panel_b: back` → edge's min_z must be < −0.01 (back-facing)
+- Before fix: stitch 7 (`panel_b=back`) had max_z=+0.115 → **wrong**. Stitch 8 (`panel_b=front`) had min_z=−0.015 → **wrong**.
+- After fix: both pass ✓
+
+**Files Changed**
+- `backend/data/patterns/tshirt.json` — Stitches 7 & 8 for `sleeve_left`:
+  - Stitch 7 `[52→31]`: `panel_b back→front`, `edge_b [92,69]→[36,16]`
+  - Stitch 8 `[31→13]`: `panel_b front→back`, `edge_b [36,16]→[69,92]` (direction also corrected: arm_corner→underarm to match cap_crown→underarm_R ordering)
+- `backend/scripts/import_tshirt.py` — Corrected the stitch generation logic and updated comments to reflect the actual `rotation_y=0` + cylindrical wrap geometry.
+
+#### Key Insights & Lessons Learned
+
+1. **"Multiple configurations all fail the same way" → the bug is upstream of the stitch indices.** When the interactive stitcher couldn't fix it, that was a signal the issue lay in the cylindrical wrap math or its interaction with the stitch resolution pipeline, not in the chosen vertex pairs themselves. The actual cause was that the stitch definitions in `tshirt.json` were regenerated from `import_tshirt.py` with wrong logic baked in.
+
+2. **Stale comments in stitch generation code are load-bearing hazards.** The `rotation_y=-90°` comment was written when the sleeve placement used that rotation. After switching to `rotation_y=0`, the comment was never updated — but the stitch assignments remained based on the old (wrong) geometry reasoning. Always re-derive which half is front/back from first principles when placement transforms change.
+
+3. **Cylindrical wrap is symmetric but the seam-half assignment is not trivial.** For both arms, u_norm=0 and u_norm=1 land at the inner armpit (same position). u_norm=0.25 → FRONT (+Z), u_norm=0.75 → BACK (−Z). But because `sleeve_left` is a horizontal mirror+reverse of `sleeve_right`, the polygon vertex ordering is reversed — so the same polygon-index ranges (e.g., `[52→31]`) map to DIFFERENT u_norm traversal directions on each panel. You cannot assume `underarm_L→crown = BACK` on one sleeve and reuse that label on the mirrored sleeve.
+
+4. **Direction of edge_b matters as much as which edge.** After swapping panel_b, the `edge_b` for the back stitch was also reversed to `[69, 92]` (arm_corner → underarm) so that cap_crown pairs with arm_corner and underarm_R pairs with body underarm — matching the direction of the sleeve edge traversal. A correct panel/edge assignment with a reversed matching direction produces a twisted seam.
+
+#### Issues Remaining
+
+| Issue | Severity | Root Cause | Status |
+|-------|----------|------------|--------|
+| Simulation not yet run with corrected stitches | High | Fixed stitches not yet physics-tested | Next session |
+| Underarm seam gap (sleeve self-stitch) | Medium | Cylindrical pre-wrap closes the gap to ~0mm; monitor in sim | Deferred |
+
+#### Future Plan (Next Session)
+
+1. **Execute the Full "Shrink & Sew" Simulation:** Run `python -m simulation --scene garment_drape` with the corrected `tshirt.json` and observe whether the sleeves assemble cleanly onto both armholes.
+2. **Constraint Tuning:** If seams are stiff or create velocity spikes, soften `stitch_compliance` from 1e-6 toward 1e-5 and monitor convergence.
+3. **Simulation Quality Review:** Check GLB output for interpenetration artifacts at the sleeve cap, shoulder seam alignment, and side seam closure.
+4. **Begin Sprint 3 (Web API Layer):** Once the t-shirt simulation produces a clean GLB, start wrapping `build_garment_mesh` + `SimulationEngine` into a FastAPI endpoint.
+
+---
+
 ### 📅 April 10, 2026 (Session 8): Interactive Stitching & Topology Calibration
 
 **Status:** ✅ Functional — Interactive 2D/3D stitching pipeline finalized; Manual topology definition successfully resolves automated heuristic failures.

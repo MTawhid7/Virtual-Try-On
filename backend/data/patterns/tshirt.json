@@ -1335,29 +1335,29 @@
       ]
     },
     {
-      "comment": "Left sleeve cap back-half \u2192 back local-right armhole",
+      "comment": "Left sleeve cap front-half \u2192 front left armhole",
       "panel_a": "sleeve_left",
       "edge_a": [
         52,
         31
       ],
-      "panel_b": "back",
+      "panel_b": "front",
       "edge_b": [
-        92,
-        69
+        36,
+        16
       ]
     },
     {
-      "comment": "Left sleeve cap front-half \u2192 front left armhole",
+      "comment": "Left sleeve cap back-half \u2192 back local-right armhole",
       "panel_a": "sleeve_left",
       "edge_a": [
         31,
         13
       ],
-      "panel_b": "front",
+      "panel_b": "back",
       "edge_b": [
-        36,
-        16
+        69,
+        92
       ]
     },
     {
