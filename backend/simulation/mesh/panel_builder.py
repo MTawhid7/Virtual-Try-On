@@ -119,10 +119,9 @@ def _cylindrical_wrap_sleeve(
 
     r = sleeve_pw / (2.0 * np.pi)
 
-    # Arm center: use body mid-Z (Front 0.20, Back -0.10 => Mid 0.05)
-    arm_cz = 0.05  
-    # Determine which arm (right vs left) from the sign of pos_x0
-    arm_cx = 0.25 if pos_x0 >= 0.0 else -0.25
+    # Arm center: use the world-space target position from the pattern JSON
+    arm_cx = float(placement["position"][0])
+    arm_cz = float(placement["position"][2])
 
     u_norm  = (u_vals - u_vals.min()) / sleeve_pw   # [0, 1]
     

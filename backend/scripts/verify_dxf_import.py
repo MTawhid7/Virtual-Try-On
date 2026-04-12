@@ -156,7 +156,7 @@ def verify_dxf(pattern_path: str):
         stitch_field = ti.Vector.field(3, dtype=ti.f32, shape=len(stitch_pts))
         stitch_field.from_numpy(stitch_pts)
 
-    show = {"body": False, "panels": True, "boundary": True, "stitch": True, "wire": False}
+    show = {"body": True, "panels": True, "boundary": True, "stitch": True, "wire": False}
 
     while window.running:
         # --- Key events ---

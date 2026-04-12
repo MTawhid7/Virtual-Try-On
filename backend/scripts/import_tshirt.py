@@ -142,12 +142,25 @@ def compute_tshirt_placements(
     Back:  centered at X=0, behind body (Z=back_z), rotated 180° (faces inward)
     Sleeves: placed to the sides at shoulder height
     """
+    # ─────────────── ADJUSTMENT GUIDE ───────────────
+    # POSITION: [X, Y, Z] (meters).
+    #   X+: Left (your right), Y+: UP, Z+: FORWARD.
+    # ROTATION:
+    #   rotation_x: Tilt (-90 = standing).
+    #   rotation_y: Spin (0 = front, 180 = back).
+    # ────────────────────────────────────────────────
+
     lm = body_profile["landmarks"]
     hem_y      = lm["hip_y"] - 0.05
     shoulder_y = lm["shoulder_y"]
-    # Set tightly fitted targets for z-depth
-    front_z = 0.20    # Close the gaping void in front
-    back_z  = -0.10   # Push back to avoid back-collision
+    # ADJUST THESE for front/back panels
+    front_z = 0.30    # Close the gaping void in front
+    back_z  = 0.02    # Push back to avoid back-collision
+
+    # ADJUST THESE for sleeve panels
+    sleeve_x_dist   = 0.25   # How far out to the sides
+    sleeve_z_base   = 0.12   # Depth: Matching body center (approx 0.16)
+    sleeve_y_offset = 0.01   # Vertical lift relative to shoulder height
 
     placements: dict[str, dict] = {}
 
@@ -163,8 +176,6 @@ def compute_tshirt_placements(
             }
 
         elif name == "back":
-            # rotation_y=180 flips X: local x=0 → world x=+pw/2, local x=pw → world x=-pw/2
-            # So placing at pos_x=+pw/2 centres the back panel at X=0 in world space.
             placements[name] = {
                 "position": [round(pw / 2, 5), round(hem_y, 5), round(back_z, 5)],
                 "rotation_x_deg": -90,
@@ -172,17 +183,16 @@ def compute_tshirt_placements(
             }
 
         elif name == "sleeve_right":
-            sleeve_z0 = 0.05 + (pw / 2.0)
+            # sleeve_z_base is now the target center of the cylinder
             placements[name] = {
-                "position": [round(0.75, 5), round(shoulder_y - ph, 5), round(sleeve_z0, 5)],
+                "position": [round(sleeve_x_dist, 5), round(shoulder_y - ph + sleeve_y_offset, 5), round(sleeve_z_base, 5)],
                 "rotation_x_deg": -90,
                 "rotation_y_deg": 0,
             }
 
         elif name == "sleeve_left":
-            sleeve_z0 = 0.05 - (pw / 2.0)
             placements[name] = {
-                "position": [round(-0.75, 5), round(shoulder_y - ph, 5), round(sleeve_z0, 5)],
+                "position": [round(-sleeve_x_dist, 5), round(shoulder_y - ph + sleeve_y_offset, 5), round(sleeve_z_base, 5)],
                 "rotation_x_deg": -90,
                 "rotation_y_deg": 0,
             }

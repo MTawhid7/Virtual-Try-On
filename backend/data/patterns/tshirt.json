@@ -345,7 +345,7 @@
         "position": [
           -0.25581,
           0.7534,
-          0.2
+          0.3
         ],
         "rotation_x_deg": -90,
         "rotation_y_deg": 0
@@ -751,7 +751,7 @@
         "position": [
           0.25644,
           0.7534,
-          -0.1
+          0.02
         ],
         "rotation_x_deg": -90,
         "rotation_y_deg": 180
@@ -991,9 +991,9 @@
       ],
       "placement": {
         "position": [
-          0.75,
-          1.26062,
-          0.25448
+          0.25,
+          1.27062,
+          0.12
         ],
         "rotation_x_deg": -90,
         "rotation_y_deg": 0
@@ -1233,9 +1233,9 @@
       ],
       "placement": {
         "position": [
-          -0.75,
-          1.26062,
-          -0.15448
+          -0.25,
+          1.27062,
+          0.12
         ],
         "rotation_x_deg": -90,
         "rotation_y_deg": 0
