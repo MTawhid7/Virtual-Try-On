@@ -4,6 +4,90 @@ This document organizes progress history, encountered issues, structural adjustm
 
 ---
 
+### 📅 April 13, 2026 (Session 12): Structured Diagnosis — Animated GLB Pipeline + Physics Bug Hunting
+
+**Status:** 🔶 Animated pipeline code-complete; right-sleeve seam closure fix staged but not yet validated.
+**Focus:** Systematic physics diagnosis before fixes; finding and fixing the root cause of low stitch density and max stretch anomaly.
+
+#### Accomplishments
+
+**Animated GLB Pipeline (Code-Complete)**
+- `engine.run()` extended with `record_every_n_frames` parameter — captures `frame_positions` snapshots in `SimResult`. Frame 0 (initial flat panels) is always included.
+- `write_glb_animated()` added to `export/gltf_writer.py` — raw glTF 2.0 binary writer using only `json` and `struct`. K keyframes → K morph targets + identity-matrix weight animation clip with LINEAR interpolation. No new dependencies.
+- `--animate` flag added to both `garment_drape.py` and the central `simulation/__main__.py` router (the router was missing the flag, causing "unrecognized argument" errors).
+- Frontend animation player: `GarmentViewer.tsx` uses Three.js `AnimationMixer` + `useFrame`; `ViewerControls.tsx` adds play/pause, SEW/DRAPE phase badge, timeline scrubber, speed selector (0.25×–2×); `page.tsx` wires full animation state with `useCallback` stable callbacks.
+- `reactStrictMode: false` in `next.config.ts` prevents React 19 StrictMode double-mount from killing the WebGL context in development.
+- `SEW_PHASE_FRACTION` updated to `240/390` to match new sew/total frame counts.
+
+**Diagnosis Infrastructure**
+- `GarmentMesh.stitch_seam_ids: list[str] | None` field added to `panel_builder.py` — one seam label (from JSON `comment`) per stitch pair. Populated in `build_garment_mesh()` alongside the stitch loop. Backward-compatible (defaults to `None`).
+- `scripts/diagnose_tshirt.py` — pre-simulation mesh diagnostic: panel placement bounds vs body surface reference, per-seam stitch count and initial gap stats (min/mean/max), edge quality. No simulation run — geometry-only, completes in seconds.
+- Per-seam gap breakdown in `garment_drape.py` validation section using `stitch_seam_ids`.
+- Per-panel max stretch breakdown with worst-edge location (vertex indices, panel, rest/final length, positions) added to `garment_drape.py`.
+
+**Critical Bug Fixed: `boundary_indices` Not Path-Ordered**
+- **Root cause:** `triangulate_panel()` built `boundary_indices` by querying `poly_subdiv` in its natural layout (`[original_verts_0..n-1, steiner_points_n..]`). When `_find_edge_particles()` walked from `start_bi` to `end_bi`, it stepped through `boundary_indices[start_bi..end_bi]` — only original polygon corners. All Steiner points lived at indices `n_poly+` and were never reached.
+- **Symptom:** Side seams (70cm, ~35 expected pairs) had only **6 stitch pairs** (the 6 original polygon vertices between the edge endpoints in the 2D pattern). Shoulder seams had 7 pairs instead of ~12.
+- **Fix:** `tree.query(poly_subdiv[np.array(path_indices, dtype=int)])` — query in `path_indices` order, which interleaves original vertices with their Steiner points.
+- **Result:** Side seams 6 → **27 pairs**; total stitch pairs 122 → **178**.
+
+**Physics Parameters Updated**
+- `sew_frames`: 150 → **240** — primary fix for right sleeve cap front-half not closing
+- `total_frames`: 320 → **390** (keeps 150 drape frames; adds ~9s to simulation)
+- `collision_thickness`: 0.008 → 0.012 (prevents tunneling during sew phase)
+- `sew_stitch_compliance`: 1e-9 → 1e-10 (10× stiffer sew stitches)
+- `bend_compliance` (cotton): 8.9e-2 → 2.0e-1 (softer folds; only this parameter changed)
+- `target_edge` in `build_garment_mesh()`: 0.030 → 0.020 (2cm target edge for denser stitching)
+- Stitch matching: `min(len_a, len_b)` → `max(...)` + linspace (no orphan seam tip vertices)
+
+#### Issues Diagnosed
+
+**Issue 1: Right Sleeve Cap Front Seam Not Closing (Primary)**
+- Initial gap distribution: min=13.1cm, max=30.6cm, range=17.5cm (left sleeve: 15.7–24.2cm, range=8.5cm)
+- After 150 sew frames: max gap 9.2cm remaining (70% closed). Left sleeve cap front: 2.1cm (91% closed).
+- Root cause: The right sleeve cylindrical wrap places the cap progressively further from the front armhole as you traverse the edge (Z goes 0.185→0.055 while armhole stays at Z=0.300), creating an 18cm gap range. The worst stitch pair starts at 30.6cm and needs ~214 frames to close at the measured closure rate of 0.143cm/frame.
+- Fix: `sew_frames` 150 → 240 (90 extra frames, 60% more closure time).
+
+**Issue 2: Max Stretch 169.6% (Derived from Issue 1)**
+- Worst edge: v[65]-v[66] in **front panel** at (X=+0.22, Y=1.35, Z=+0.19) — the right armhole rim.
+- Rest length 1.63cm, final 4.39cm (169.6%).
+- Mechanism: The drape stitch (1e-8 compliance) continues pulling vertex 65 toward its sleeve partner (9.2cm away) while vertex 66 has a smaller gap and moves less. Differential displacement stretches the edge between them. The strain limit (`max_stretch=0.05`) can't hold because the stitch re-stretches the edge within the same solver iteration (stitch runs before strain limit in each iteration).
+- Fix: Same as Issue 1 — closing the seam before the drape phase eliminates the differential stitch force.
+
+**Issue 3: Per-Panel Stretch Distortion (Derived)**
+- `sleeve_right`: mean 16.34%, 219/785 edges (28%) over 20%, max 144%.
+- `front`: 149/4395 edges over 20%, max 169%.
+- `back`: 194/4707 edges over 20%, max 84%.
+- Mechanism: Non-uniform stitch gaps during sew phase (18cm range on right sleeve cap) create asymmetric forces that deform the sleeve mesh. Left sleeve (8.5cm range) has much less distortion (mean 11.78%, 18% over 20%).
+- Fix: Fully closing the seam (Issue 1 fix) should dramatically reduce sleeve distortion.
+
+#### Key Insights Gained
+
+1. **`boundary_indices` must be path-ordered, not `poly_subdiv`-ordered.** `poly_subdiv = original_verts + steiner_points` puts all Steiner points AFTER all original vertices. The boundary walk needs interleaved ordering to collect Steiner points between polygon corners. Any future triangulator change must preserve `path_indices`-ordered `boundary_indices`.
+
+2. **Per-seam metadata is essential for diagnosis.** Without `stitch_seam_ids`, the stitch gap breakdown was a single number. With it, we could immediately identify "Right sleeve cap front-half" as the failing seam in one run. This diagnostic infrastructure should be maintained.
+
+3. **The strain limit vs active stitch: a fundamental conflict.** If any stitch pair has a non-zero gap entering the drape phase, the drape stitch compliance (`1e-8`) keeps applying force, which may exceed what the strain limit can correct (since the stitch runs BEFORE the strain limit in each solver iteration). The only robust fix is to ensure seams close completely during sew phase, not rely on the strain limit to compensate.
+
+4. **Asymmetric initial gap distribution causes more damage than large uniform gaps.** The left sleeve cap front started at 24.2cm max and closed to 2.1cm. The right started at 30.6cm but with an 18cm RANGE — some pairs far, some close. The non-uniform forces deformed the sleeve mesh to 16% mean stretch. If the right sleeve started uniformly at 28cm (same as back-to-front panel distance), it would close more evenly. The large range is the problem, not just the large max.
+
+5. **seam closure rate (0.143cm/frame) is approximately linear** at the compliance and substep settings used. This allows predicting required `sew_frames` from initial gaps: `frames = max_initial_gap / closure_rate`. For target_edge=0.020 and the current solver config, 2cm/frame × 150 frames → 30cm max closeable. The right sleeve cap's 30.6cm is right at this limit, which is why 150 frames was marginally insufficient.
+
+#### Remaining Issues (Next Session)
+
+1. **Validate `sew_frames=240` fix** — run simulation, check: right sleeve cap front max gap < 2cm, max stretch < 30%, `n_over20pct` drops for all panels.
+2. **Test animated GLB** — run `--animate`, verify timeline controls work in browser, animation plays from flat panels → sewn → draped.
+3. **Right sleeve vs left sleeve initial gap asymmetry** — if the seam still doesn't close at 240 frames, investigate stitch matching direction in tshirt.json. The right sleeve cap front edge walks [25→43] fwd while left walks [52→31] bwd — confirming the `_find_edge_particles` paths are consistent, but the geometric "close" vs "far" end alignment may still be suboptimal.
+4. **FastAPI backend** — Sprint 3 Layer 2: HTTP API for running simulations on demand.
+
+#### Future Plan
+
+- **Immediate (next session):** Validate `sew_frames=240`, test animated GLB, check per-panel stretch.
+- **Short-term:** If right sleeve still has issues, consider adjusting the cylindrical pre-wrap to position the sleeve cap closer and more uniformly to the armhole.
+- **Medium-term:** FastAPI backend (`backend/app/`) — POST /simulate endpoint with pattern + fabric parameters → returns GLB download URL.
+- **Long-term:** Investigate stitch arc-length-proportional matching to ensure uniform initial gap distribution regardless of pattern vertex ordering.
+
+---
 
 ### 📅 April 13, 2026 (Session 10): Refinement of Simulation Pipeline (Phases 0-4)
 

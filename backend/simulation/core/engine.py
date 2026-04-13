@@ -29,10 +29,11 @@ from simulation.solver.integrator import Integrator
 class SimResult:
     """Output of a simulation run."""
 
-    positions: NDArray[np.float32]   # (N, 3) final vertex positions
-    faces: NDArray[np.int32]         # (F, 3) triangle indices
-    normals: NDArray[np.float32]     # (N, 3) vertex normals
-    uvs: NDArray[np.float32] | None  # (N, 2) UV coordinates
+    positions: NDArray[np.float32]              # (N, 3) final vertex positions
+    faces: NDArray[np.int32]                    # (F, 3) triangle indices
+    normals: NDArray[np.float32]                # (N, 3) vertex normals
+    uvs: NDArray[np.float32] | None             # (N, 2) UV coordinates
+    frame_positions: list[NDArray[np.float32]] | None = None  # per-keyframe snapshots
 
     def export_glb(self, path: str | Path) -> Path:
         """
@@ -177,16 +178,26 @@ class SimulationEngine:
             if self.solver is not None and hasattr(self.solver, 'apply_damping'):
                 self.solver.apply_damping(state)
 
-    def run(self, state: ParticleState, progress_callback=None) -> SimResult:
+    def run(
+        self,
+        state: ParticleState,
+        progress_callback=None,
+        record_every_n_frames: int = 0,
+    ) -> SimResult:
         """
         Run the full simulation loop (sew phase → drape phase).
 
         Args:
             state: Initialized ParticleState with positions loaded.
             progress_callback: Optional callable(frame, total_frames) for progress.
+            record_every_n_frames: If > 0, snapshot positions every N frames.
+                Frame 0 (initial panel layout) is always included as the first
+                snapshot. Use 5 for ~64 keyframes from a 320-frame sim.
+                Snapshots are returned in SimResult.frame_positions.
 
         Returns:
-            SimResult with final positions, faces, normals, UVs.
+            SimResult with final positions, faces, normals, UVs, and optionally
+            frame_positions (list of per-keyframe (N,3) position arrays).
         """
         config = self.config
 
@@ -194,9 +205,17 @@ class SimulationEngine:
         if self.solver is not None:
             self.solver.initialize(state, config)
 
+        # Capture the initial panel layout as frame 0 (flat panels, pre-physics)
+        frame_positions: list[NDArray[np.float32]] = []
+        if record_every_n_frames > 0:
+            frame_positions.append(state.get_positions_numpy().copy())
+
         # --- Main simulation loop ---
         for frame in range(config.total_frames):
             self.step_frame(state, frame=frame)
+
+            if record_every_n_frames > 0 and (frame + 1) % record_every_n_frames == 0:
+                frame_positions.append(state.get_positions_numpy().copy())
 
             if progress_callback:
                 progress_callback(frame + 1, config.total_frames)
@@ -211,4 +230,5 @@ class SimulationEngine:
             faces=faces,
             normals=normals,
             uvs=state.uvs,
+            frame_positions=frame_positions if frame_positions else None,
         )

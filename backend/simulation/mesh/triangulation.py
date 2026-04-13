@@ -180,9 +180,18 @@ def triangulate_panel(
     old_to_new_mapping = original_vertex_mapping.astype(np.int32)
 
     # --- Build boundary_indices: ALL boundary vertices in path order ---
-    # This includes the Steiner points inserted between polygon corners.
-    # These are critical for dense stitch resolution (Phase 1).
-    _, boundary_indices = tree.query(poly_subdiv)
+    # Must query poly_subdiv in PATH ORDER (original verts interleaved with their
+    # Steiner points) so that _find_edge_particles() can walk from v_start to v_end
+    # and collect the Steiner points in between.
+    #
+    # poly_subdiv layout: [original_verts(0..n_poly-1)] + [steiner_points(n_poly..)]
+    # path_indices layout: [v0, st_0_1, st_0_2, ..., v1, st_1_1, ..., v2, ...]
+    #
+    # Querying poly_subdiv directly would give boundary_indices with original verts
+    # first and all Steiners at the end — causing _find_edge_particles() to walk
+    # through original corners only (e.g. 6 pairs on a 70cm side seam instead of ~35).
+    path_ordered_pts = poly_subdiv[np.array(path_indices, dtype=int)]
+    _, boundary_indices = tree.query(path_ordered_pts)
     boundary_indices = boundary_indices.astype(np.int32)
 
     # --- Lift 2D → 3D (XZ plane, Y=0) ---

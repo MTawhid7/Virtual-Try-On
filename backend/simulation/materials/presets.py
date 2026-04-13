@@ -40,7 +40,7 @@ class FabricPreset:
 #   jersey  stretch α̃=0.812  bend α̃=29258 → stretchy, conforms tightly
 #   chiffon stretch α̃=0.162  bend α̃=29258 → lightweight, billowy
 FABRIC_PRESETS: dict[str, FabricPreset] = {
-    "cotton":  FabricPreset("cotton",  stretch_compliance=1.4e-6, bend_compliance=8.9e-2, density=0.30, damping=0.990, friction=0.35, max_stretch=0.05, max_compress=0.15, stretch_damping=0.20, bend_damping=0.10),
+    "cotton":  FabricPreset("cotton",  stretch_compliance=1.4e-6, bend_compliance=2.0e-1, density=0.30, damping=0.990, friction=0.35, max_stretch=0.05, max_compress=0.15, stretch_damping=0.20, bend_damping=0.10),
     "silk":    FabricPreset("silk",    stretch_compliance=7.1e-6, bend_compliance=4.2e-1, density=0.12, damping=0.995, friction=0.20, max_stretch=0.08, max_compress=0.20, stretch_damping=0.10, bend_damping=0.05),
     "denim":   FabricPreset("denim",   stretch_compliance=1.4e-8, bend_compliance=7.1e-3, density=0.60, damping=0.980, friction=0.45, max_stretch=0.02, max_compress=0.01, stretch_damping=0.50, bend_damping=0.30),
     "jersey":  FabricPreset("jersey",  stretch_compliance=1.4e-5, bend_compliance=7.1e-1, density=0.25, damping=0.990, friction=0.30, max_stretch=0.20, max_compress=0.10, stretch_damping=0.15, bend_damping=0.05),

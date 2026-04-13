@@ -62,6 +62,7 @@ class GarmentMesh:
     panel_offsets: list[int]             # start vertex index of each panel
     panel_ids: list[str]                 # panel id strings in order
     fabric: str                          # fabric name from pattern JSON
+    stitch_seam_ids: list[str] | None = None  # one seam label per stitch pair (from JSON comment)
 
 
 def _rotation_x(deg: float) -> NDArray[np.float64]:
@@ -287,6 +288,7 @@ def build_garment_mesh(
     pattern_path: str | Path,
     resolution: int = 20,
     global_scale: float = 1.0,
+    target_edge: float = 0.020,
 ) -> GarmentMesh:
     """
     Load a pattern JSON and build a merged GarmentMesh.
@@ -301,6 +303,11 @@ def build_garment_mesh(
     Args:
         pattern_path: Path to the pattern JSON file.
         resolution:   Triangulation density (passed to triangulate_panel).
+        target_edge:  Target boundary/interior edge length in metres.
+                      Controls stitch density: 0.020m gives ~50% more stitch
+                      pairs than the old 0.030m default. Passed directly to
+                      triangulate_panel(), overriding the resolution-derived
+                      value when explicitly set.
 
     Returns:
         GarmentMesh with merged positions/faces/edges/uvs, stitch_pairs,
@@ -323,7 +330,7 @@ def build_garment_mesh(
     panel_ids: list[str] = []
 
     for pspec in panel_specs:
-        panel_local = triangulate_panel(pspec["vertices_2d"], resolution=resolution)
+        panel_local = triangulate_panel(pspec["vertices_2d"], resolution=resolution, target_edge=target_edge)
         world_pos   = _apply_placement(panel_local.positions, pspec["placement"], global_scale=global_scale)
         if "sleeve" in pspec["id"].lower():
             # Force cylindrical wrap for ALL sleeves regardless of aspect ratio
@@ -361,18 +368,22 @@ def build_garment_mesh(
     # --- Step 5: Resolve stitch definitions → global index pairs ---
     panel_id_to_idx = {pid: i for i, pid in enumerate(panel_ids)}
     stitch_pairs_list: list[tuple[int, int]] = []
+    seam_ids: list[str] = []
 
-    for sdef in stitch_specs:
+    for s_idx, sdef in enumerate(stitch_specs):
         pa_idx = panel_id_to_idx[sdef["panel_a"]]
         pb_idx = panel_id_to_idx[sdef["panel_b"]]
         ea = sdef["edge_a"]   # [v_start, v_end] in polygon outline space
         eb = sdef["edge_b"]
+        seam_label = sdef.get("comment", f"seam_{s_idx}")
 
         local_a = _find_edge_particles(panels_local[pa_idx], ea[0], ea[1])
         local_b = _find_edge_particles(panels_local[pb_idx], eb[0], eb[1])
 
-        # Match by relative position along edge (zip shortest)
-        n_pts = min(len(local_a), len(local_b))
+        # Match by relative position along edge — use the longer edge's count so
+        # every vertex on both edges gets a stitch partner (no orphan seam tips).
+        # The shorter edge is resampled via np.linspace to cover the full span.
+        n_pts = max(len(local_a), len(local_b))
         if n_pts == 0:
             continue
 
@@ -385,6 +396,7 @@ def build_garment_mesh(
 
         for i in range(n_pts):
             stitch_pairs_list.append((int(local_a[idx_a[i]]) + off_a, int(local_b[idx_b[i]]) + off_b))
+        seam_ids.extend([seam_label] * n_pts)
 
     stitch_pairs = (
         np.array(stitch_pairs_list, dtype=np.int32)
@@ -401,4 +413,5 @@ def build_garment_mesh(
         panel_offsets=panel_offsets,
         panel_ids=panel_ids,
         fabric=fabric,
+        stitch_seam_ids=seam_ids if seam_ids else None,
     )

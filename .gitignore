@@ -45,3 +45,6 @@ out/
 # Environment
 .env
 .env.local
+
+# Claude Code session data (user-specific, not project state)
+.claude/

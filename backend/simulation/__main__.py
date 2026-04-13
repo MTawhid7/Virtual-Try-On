@@ -38,6 +38,10 @@ def main() -> None:
         "--resolution", "-r", type=int, default=8,
         help="Mesh triangulation resolution for garment_drape (default 8 for interactive speed).",
     )
+    parser.add_argument(
+        "--animate", action="store_true",
+        help="Export animated GLB (morph-target drape sequence) for garment_drape scene.",
+    )
 
     args = parser.parse_args()
 
@@ -54,7 +58,8 @@ def main() -> None:
     elif args.scene == "body_drape":
         run_body_drape(visualize=args.visualize, output_path=output_path)
     elif args.scene == "garment_drape":
-        kwargs = dict(visualize=args.visualize, output_path=output_path, resolution=args.resolution)
+        kwargs = dict(visualize=args.visualize, output_path=output_path,
+                      resolution=args.resolution, animate=args.animate)
         if args.pattern:
             kwargs["pattern_path"] = args.pattern
         run_garment_drape(**kwargs)

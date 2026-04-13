@@ -67,6 +67,14 @@ python -m simulation --scene body_drape
 python -m simulation --scene garment_drape
 # → storage/garment_drape.glb
 
+# Animated GLB export (morph-target drape sequence for frontend player)
+python -m simulation --scene garment_drape --animate
+# → storage/garment_drape_animated.glb (+ static garment_drape.glb alongside)
+
+# Export GLBs to frontend viewer
+python -m scripts.export_for_viewer
+# → frontend/public/models/*.glb  (then open http://localhost:3000/viewer)
+
 # Export to custom path
 python -m simulation --scene sphere_drape -o my_output.glb
 ```
@@ -102,7 +110,9 @@ python -m pytest tests/integration/ -v
 | **Sprint 2, Algorithm Upgrades** | ✅ | Track A: analytical bending gradients (cotangent-weighted ∂θ/∂p, closes-form Bergou formula). Track B: hard strain limiting per substep (Provot/Müller clamping). Track C: cloth self-collision (dynamic centroid hash, 1-ring exclusion, euclidean penetration gate). Track D: constraint-based velocity damping (stretch + bend modes). |
 | **Sprint 2, Draping Realism** | ✅ | Fixed collision velocity injection, reordered simulation loop, and tuned materials. Cloth settles at ~0.15 m/s. |
 | **Sprint 2, Sew-then-Drape** | ✅ | Implemented a 30 FPS pipeline with boundary resampling (min 7mm edge), dense stitching (Steiner points), and a two-stage assembly loop. Seam welding and pattern validation added. |
-| **Sprint 3** | 🔶 | Backend API (FastAPI) & Frontend (Next.js) development. |
+| **Sprint 3, Viewer** | ✅ | Next.js 16 + React Three Fiber viewer with studio lighting, OrbitControls, cloth/body material assignment, model selector, wireframe toggle, background toggle, cloth color swatches. |
+| **Sprint 3, Animated GLB** | 🔶 | Raw glTF 2.0 morph-target animated export (`write_glb_animated()`). Frontend `AnimationMixer` player with play/pause, timeline scrubber, SEW/DRAPE phase badge, speed selector. Physics diagnosis in progress — `sew_frames=240` fix pending validation. |
+| **Sprint 3, Backend API** | ⬜ | FastAPI layer to serve simulations via HTTP (pattern selector + fabric picker → run simulation). |
 | **Sprint 4** | ⬜ | Integration, polish, end-to-end testing |
 
 ## Technology Stack
