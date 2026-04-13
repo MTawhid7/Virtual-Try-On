@@ -173,12 +173,17 @@ def _apply_placement(
     Combined with translation [-0.2, 0.65, 0.12] this places the panel
     upright in the torso region (Y=0.65–1.35) at Z=+0.12.
 
+    With global_scale=1.0 (sew-then-drape default), this is a pure
+    rotation + translation. The old scaling logic is retained for
+    backward compatibility but should not be used with new patterns.
+
     Args:
         positions_local: (N, 3) positions in local panel space.
         placement: dict with keys:
             'position'       ([x, y, z]) — world-space translation
             'rotation_y_deg' — Y-axis rotation in degrees (default 0)
             'rotation_x_deg' — X-axis rotation applied first (default 0)
+        global_scale: Scale factor for panel size. 1.0 = no scaling (default).
 
     Returns:
         (N, 3) float32 world-space positions.
@@ -193,13 +198,14 @@ def _apply_placement(
         pts = pts @ _rotation_x(rot_x_deg).T   # apply X rotation first
 
     rotated = pts @ _rotation_y(rot_y_deg).T   # then Y rotation
-    
-    rotated *= global_scale
-    body_center = np.array([0.0, 1.25, 0.0], dtype=np.float64)
-    direction = translation - body_center
-    translation_scaled = body_center + direction * global_scale
-    
-    world = rotated + translation_scaled               # broadcast translate
+
+    if global_scale != 1.0:
+        rotated *= global_scale
+        body_center = np.array([0.0, 1.25, 0.0], dtype=np.float64)
+        direction = translation - body_center
+        translation = body_center + direction * global_scale
+
+    world = rotated + translation               # broadcast translate
 
     return world.astype(np.float32)
 
@@ -213,38 +219,68 @@ def _find_edge_particles(
     Return particle indices along the polygon boundary from v_start to v_end,
     walking in the shorter direction around the perimeter.
 
-    The previous chord-projection approach projected all particles onto the
-    straight line between the two endpoint vertices. For curved edges (armhole,
-    neckline) the chord cuts through the panel interior, capturing hundreds of
-    interior grid particles — wrong. The boundary walk is exact: it follows the
-    actual polygon outline, collecting only the original polygon vertices
-    (stored at positions[0..P-1] since boundary_indices = arange(P)).
+    This version includes ALL boundary vertices between the two endpoints —
+    including Steiner points inserted by the triangulator. This gives dense
+    stitch coverage (≥1 stitch pair per ~3cm of seam length instead of only
+    at original polygon corners).
+
+    Algorithm:
+        1. Find where the original polygon vertices v_start and v_end appear
+           in the full boundary_indices array (which includes Steiner points)
+        2. Walk boundary_indices between those positions, collecting every
+           vertex index along the path
 
     Args:
         panel:   TriangulatedPanel (local space, Y=0).
-        v_start: Polygon vertex index (start of edge).
-        v_end:   Polygon vertex index (end of edge).
+        v_start: Polygon vertex index (start of edge) in the original polygon.
+        v_end:   Polygon vertex index (end of edge) in the original polygon.
 
     Returns:
         (M,) int32 array of particle indices along the boundary, ordered
-        from v_start to v_end inclusive.
+        from v_start to v_end inclusive. Includes all Steiner points.
     """
     n = len(panel.boundary_indices)
 
-    start_mapped = int(panel.original_vertex_mapping[v_start])
-    end_mapped = int(panel.original_vertex_mapping[v_end])
+    # Map original polygon vertex indices to their position indices in the mesh
+    start_pos_idx = int(panel.original_vertex_mapping[v_start])
+    end_pos_idx = int(panel.original_vertex_mapping[v_end])
 
-    d_fwd = (end_mapped - start_mapped) % n
-    d_bwd = (start_mapped - end_mapped) % n
+    # Find where these position indices appear in boundary_indices
+    # boundary_indices is ordered along the boundary path and may contain
+    # many more entries than the original polygon (due to Steiner points)
+    start_bi = -1
+    end_bi = -1
+    for k in range(n):
+        if panel.boundary_indices[k] == start_pos_idx and start_bi == -1:
+            start_bi = k
+        if panel.boundary_indices[k] == end_pos_idx and end_bi == -1:
+            end_bi = k
+
+    if start_bi == -1 or end_bi == -1:
+        # Fallback: return just the two endpoints
+        return np.array([start_pos_idx, end_pos_idx], dtype=np.int32)
+
+    # Walk the shorter direction around the boundary
+    d_fwd = (end_bi - start_bi) % n
+    d_bwd = (start_bi - end_bi) % n
 
     if d_fwd <= d_bwd:
-        indices = [int(panel.boundary_indices[(start_mapped + k) % n])
+        indices = [int(panel.boundary_indices[(start_bi + k) % n])
                    for k in range(d_fwd + 1)]
     else:
-        indices = [int(panel.boundary_indices[(start_mapped - k) % n])
+        indices = [int(panel.boundary_indices[(start_bi - k) % n])
                    for k in range(d_bwd + 1)]
 
-    return np.array(indices, dtype=np.int32)
+    # Deduplicate while preserving order (triangle library may map multiple
+    # boundary_indices entries to the same mesh vertex)
+    seen = set()
+    unique = []
+    for idx in indices:
+        if idx not in seen:
+            seen.add(idx)
+            unique.append(idx)
+
+    return np.array(unique, dtype=np.int32)
 
 
 def build_garment_mesh(

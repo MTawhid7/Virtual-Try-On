@@ -58,7 +58,7 @@ class TestStrainLimit:
         max_compress = 0.01  # allow 1% compression
 
         dc.apply_strain_limit(
-            state.positions, state.inv_mass, dc.n_edges, max_stretch, max_compress
+            state.positions, state.inv_mass, dc.n_edges, max_stretch, max_compress, 1.0
         )
 
         pos = state.get_positions_numpy()
@@ -83,7 +83,7 @@ class TestStrainLimit:
         max_compress = 0.01  # allow only 1% compression
 
         dc.apply_strain_limit(
-            state.positions, state.inv_mass, dc.n_edges, max_stretch, max_compress
+            state.positions, state.inv_mass, dc.n_edges, max_stretch, max_compress, 1.0
         )
 
         pos = state.get_positions_numpy()
@@ -106,7 +106,7 @@ class TestStrainLimit:
         pos_before = state.get_positions_numpy().copy()
 
         dc.apply_strain_limit(
-            state.positions, state.inv_mass, dc.n_edges, 0.05, 0.01
+            state.positions, state.inv_mass, dc.n_edges, 0.05, 0.01, 1.0
         )
 
         pos_after = state.get_positions_numpy()
@@ -142,7 +142,7 @@ class TestStrainLimit:
         state.inv_mass.from_numpy(inv_masses)
 
         dc.apply_strain_limit(
-            state.positions, state.inv_mass, dc.n_edges, 0.05, 0.01
+            state.positions, state.inv_mass, dc.n_edges, 0.05, 0.01, 1.0
         )
 
         pos = state.get_positions_numpy()
@@ -177,7 +177,7 @@ class TestStrainLimit:
         pos_p0_before = state.get_positions_numpy()[0].copy()
 
         dc.apply_strain_limit(
-            state.positions, state.inv_mass, dc.n_edges, 0.05, 0.01
+            state.positions, state.inv_mass, dc.n_edges, 0.05, 0.01, 1.0
         )
 
         pos_p0_after = state.get_positions_numpy()[0]

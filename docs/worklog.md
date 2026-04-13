@@ -4,7 +4,52 @@ This document organizes progress history, encountered issues, structural adjustm
 
 ---
 
-### 📅 April 10, 2026 (Session 9): Sleeve Armhole Stitch Inversion Diagnosis & Fix
+
+### 📅 April 13, 2026 (Session 10): Refinement of Simulation Pipeline (Phases 0-4)
+
+**Status:** ✅ Optimized for Performance; 🔶 Physically Unfinished — Achieved 30 FPS target but assembly quality and fabric conformance remain problematic.
+**Focus:** Transitioning the engine to a "Sew-then-Drape" workflow, optimizing for real-time interaction, and improving mesh quality through boundary resampling.
+
+#### Accomplishments
+
+**Mesh Quality Foundation (Phase 0)**
+- Integrated a **Boundary-Resampled Constrained Delaunay Triangulator**.
+- Implemented `min_edge = 7mm` threshold to eliminate pathological 1-2mm edges from DXF imports, significantly improving solver stability.
+- Configurable `target_edge` (default 3cm) reduced particle count by ~75%, enabling real-time speed.
+
+**Dense Stitching (Phase 1)**
+- Rewrote the stitch resolver to walk the entire panel boundary between corner landmarks.
+- Captured **Steiner points** (intermediate boundary vertices), increasing stitch density from 4-5 pairs to 20-30 pairs per seam.
+
+**Performance Optimization (Phase 2)**
+- Reduced XPBD overhead to **4 substeps and 8 iterations** per frame.
+- Disabled self-collision to eliminate the GPU-CPU sync bottleneck.
+- Achieved **~30 FPS** in visualizer (dependent on local hardware).
+
+**Sew-then-Drape Pipeline (Phases 3 & 4)**
+- Replaced the "shrink-to-fit" method with a two-stage assembly loop:
+  - **Sew Phase (Frames 0-80):** 5% gravity, stiff stitch compliance (`1e-9`), and disabled strain limits to allow seamless assembly.
+  - **Drape Phase (Frames 81-300):** Full gravity, normal compliance (`1e-7`), and active strain limits.
+- Added a post-simulation **Seam Welder** to merge final stitch pairs within 2mm.
+
+#### Current State & Physical Issues
+- **Stitch Closure Failure:** While side seams are better, some complex areas (Right Sleeve) fail to close entirely. Max gap recorded: **10.51cm** (target < 5cm).
+- **Visual Stiffness:** The fabric appears "curved" and rigid (like paper or plastic) rather than conforming to the body. It maintains a "stiff arch" over the appendages.
+- **Interaction Bug:** The visualizer's camera rotation is not correctly orbiting the mannequin center; the body appears to move with the camera.
+
+#### Key Insights & Lessons Learned
+1. **Low Substeps = High Stiffness:** Reducing substeps to 4 for real-time speed makes the XPBD "bend compliance" feel much stiffer. The solver doesn't have enough "time" to relax the mesh into natural folds per frame.
+2. **Sleeve Assembly Paradox:** Placing the sleeve far from the armhole to avoid initial collision makes it impossible for 80 frames of "sewing" to close the gap. The sleeve gets "caught" or takes a curved trajectory that fights the body collision.
+3. **Max Stretch Spikes:** Even with a mean stretch of 4%, local max stretch hit **111%**. These spikes occur at stitch points where the mesh is stretched to its limit but the solver cannot finalize the closure due to body blocking or low iterations.
+
+#### Future Plan (Session 11 & Beyond)
+1. **Cylindrical Pre-Wrap Refinement:** Improve the initial placement of sleeves to be closer to the armhole or start partially "pre-wrapped" around the arm.
+2. **Substep-Independent Compliance:** Implement the scaling factor for compliance ($\tilde{\alpha} = \alpha / \Delta t^2$) more rigorously to ensure material softness stays consistent regardless of frame rate/substep changes.
+3. **Continuous Collision Detection (CCD):** Implement a simple CCD pass to prevent fabric from tunneling into the body during the high-velocity "sew" phase.
+4. **Enhanced Visualization:** Move beyond the basic Taichi GGUI to a modern rendering stack (see Feedback section).
+
+---
+
 
 **Status:** ✅ Fixed — Right sleeve (viewer perspective) stitch connections corrected; all 10 stitch lines verified correct in 3D preview.
 **Focus:** Diagnosing why one sleeve's front/back armhole stitches were swapped despite multiple manual attempts to override them through the interactive stitcher.

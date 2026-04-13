@@ -100,9 +100,8 @@ python -m pytest tests/integration/ -v
 | **Sprint 2, Physics Realism** | ✅ | Shear edges, fabric presets (`materials/presets.py`), resting contact friction, air drag, substep rebalancing (6×12 → 15×2), compliance re-calibration for new substep_dt. |
 | **Sprint 2, Fabric Realism** | ✅ | Area-weighted particle mass (lumped-mass FEM, density from `FabricPreset`), softer cotton bending (`bend_compliance 8e-4→7.4e-3`), reduced damping/friction, grid 40×40→60×60, solver iterations 2→8. Cloth now forms visible folds and conforms to body surface. |
 | **Sprint 2, Algorithm Upgrades** | ✅ | Track A: analytical bending gradients (cotangent-weighted ∂θ/∂p, closes-form Bergou formula). Track B: hard strain limiting per substep (Provot/Müller clamping). Track C: cloth self-collision (dynamic centroid hash, 1-ring exclusion, euclidean penetration gate). Track D: constraint-based velocity damping (stretch + bend modes). |
-| **Sprint 2, Draping Realism** | ✅ | Fixed collision velocity injection (body/self) by updating `predicted[i] += correction`, preventing energy buildup. Reordered simulation loop: self-collision now runs once per substep **before** the XPBD iterations. Shrunk resting friction zone (5.0→1.5 thickness), relaxed Cotton `max_compress` (1%→10%), and softened bending (1.5e-2). Cloth now settles fully (mean speed ~0.15 m/s) and conforms smoothly without "floating." |
-| **Sprint 2 Layer 3b-Ext Ph1–4** | ✅ | Pattern triangulation, stitch constraints, and panel builder. 2D/3D manual stitch editor and 3D diagnostic preview tools finalized. |
-| **Sprint 2, Layer 3b-Ext Ph5** | ✅ | Professional Pattern Pipeline — DXF Importer (`scripts/import_dxf.py`) extracting CLO3D AAMA pieces. Synchronized cylindrical sleeve wrapping (Standard: First Half = Front). Manual Interactive Stitcher for robust topology definition. |
+| **Sprint 2, Draping Realism** | ✅ | Fixed collision velocity injection, reordered simulation loop, and tuned materials. Cloth settles at ~0.15 m/s. |
+| **Sprint 2, Sew-then-Drape** | ✅ | Implemented a 30 FPS pipeline with boundary resampling (min 7mm edge), dense stitching (Steiner points), and a two-stage assembly loop. Seam welding and pattern validation added. |
 | **Sprint 3** | 🔶 | Backend API (FastAPI) & Frontend (Next.js) development. |
 | **Sprint 4** | ⬜ | Integration, polish, end-to-end testing |
 

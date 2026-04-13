@@ -113,6 +113,8 @@ def visualize_simulation(
 
     start_time = time.perf_counter()
 
+    last_time = time.perf_counter()
+
     while window.running and frame < config.total_frames:
         # --- Input handling ---
         # Check for pause toggle (Space key)
@@ -127,9 +129,18 @@ def visualize_simulation(
 
         # --- Simulation step ---
         if not paused or step_one:
-            engine.step_frame(state)
+            engine.step_frame(state, frame=frame)
             frame += 1
             step_one = False
+
+            # Compute FPS
+            now = time.perf_counter()
+            frame_dt = now - last_time
+            fps = 1.0 / max(frame_dt, 1e-6)
+            last_time = now
+
+            # Phase indicator
+            phase = "SEW" if frame <= config.sew_frames else "DRAPE"
 
             # Print frame diagnostics
             positions_np = state.get_positions_numpy()
@@ -138,7 +149,7 @@ def visualize_simulation(
             velocities_np = state.get_velocities_numpy()
             mean_speed = float(np.mean(np.linalg.norm(velocities_np, axis=1)))
 
-            diag = f"  Frame {frame:3d}/{config.total_frames} | Y:[{min_y:.3f}, {max_y:.3f}] | speed:{mean_speed:.3f} m/s"
+            diag = f"  [{phase}] Frame {frame:3d}/{config.total_frames} | {fps:.1f} FPS | Y:[{min_y:.3f}, {max_y:.3f}] | speed:{mean_speed:.3f} m/s"
 
             # Stitch gap diagnostic
             if stitch_pairs is not None and len(stitch_pairs) > 0:
@@ -147,7 +158,7 @@ def visualize_simulation(
                 gaps = np.linalg.norm(pa - pb, axis=1)
                 max_gap = float(np.max(gaps))
                 mean_gap = float(np.mean(gaps))
-                diag += f" | stitch gap: max={max_gap*100:.1f}cm mean={mean_gap*100:.1f}cm"
+                diag += f" | gap: max={max_gap*100:.1f}cm mean={mean_gap*100:.1f}cm"
 
             print(f"\r{diag}", end="", flush=True)
 

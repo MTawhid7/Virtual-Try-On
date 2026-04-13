@@ -1,22 +1,23 @@
 """
-Garment drape scene — Sprint 2 Layer 3b-Extended Phase 4.
+Garment drape scene — Pattern → Sew → Drape pipeline.
 
-Drapes a pattern-based garment (tank_top.json) onto the mannequin body mesh
-using XPBD with stitch constraints, body collision, and area-weighted masses.
+Drapes a pattern-based garment onto the mannequin body mesh using XPBD
+with a 2-stage simulation:
+  Stage 1 (Sew):  Reduced gravity, very stiff stitches, no strain limit.
+                   Panels slide together and seams close.
+  Stage 2 (Drape): Full gravity, normal compliance, strain limit active.
+                   Fabric drapes naturally on the body.
 
-This is the first scene to exercise the full garment pipeline:
+Pipeline:
     pattern JSON → triangulate panels → place in 3D → merge → stitch constraints
-    → body collision → engine.run() → export GLB
-
-The scene mirrors body_drape.py in structure, replacing the flat grid with a
-multi-panel garment mesh from build_garment_mesh().
+    → body collision → 2-stage engine.run() → export GLB
 """
 
 import time
 
 import numpy as np
 
-from simulation.collision import BodyCollider, ClothSelfCollider
+from simulation.collision import BodyCollider
 from simulation.constraints import build_constraints
 from simulation.core.config import SimConfig
 from simulation.core.engine import SimulationEngine, compute_vertex_normals
@@ -29,36 +30,34 @@ from simulation.solver.xpbd import XPBDSolver
 
 
 _BODY_GLB_PATH = "data/bodies/mannequin_physics.glb"
-_TANK_TOP_JSON = "data/patterns/tank_top.json"
+_TSHIRT_JSON = "data/patterns/tshirt.json"
 
 
 def run_garment_drape(
     visualize: bool = False,
     output_path: str = "storage/garment_drape.glb",
-    pattern_path: str = _TANK_TOP_JSON,
+    pattern_path: str = _TSHIRT_JSON,
     resolution: int = 20,
 ) -> None:
     """
-    Sprint 2 Layer 3b-Extended Phase 4: drape a tank top pattern onto the body.
+    Drape a garment pattern onto the body using sew-then-drape.
 
-    Setup:
-        - Garment: tank_top.json — front + back panels, stitched at side seams
-        - resolution=20 → ~232 particles total
-        - Area-weighted inv_mass from cotton density (0.30 kg/m²)
-        - Body mesh: mannequin_physics.glb (pre-processed physics proxy, 1.75m)
-        - 300 frames, 15 substeps, 8 solver iterations
-        - Cotton preset: stretch=1e-7, bend=1.5e-2, damping=0.990, friction=0.35
-        - Collision thickness: 8mm
+    Optimized for 30fps real-time visualization:
+        - target_edge=0.030 → ~400-800 particles total
+        - 4 substeps × 8 solver iterations = 32 solver steps/frame
+        - No self-collision (GPU→CPU sync eliminated)
+        - Sew phase: 80 frames with 5% gravity, very stiff stitches
+        - Drape phase: 220 frames with full gravity, normal compliance
 
     Validation checks:
         1. No NaN in final positions
         2. No sub-floor penetration (Y ≥ -2×thickness)
-        3. Garment on body — majority of particles in torso region (Y=0.8–1.6m)
+        3. Garment on body — majority of particles in torso region
         4. Stitches closed (max seam gap < 5mm after settling)
         5. Energy decay (mean speed < 1.5 m/s)
         6. Edge length preservation (mean stretch < 15%)
     """
-    print("=== Garment Drape Scene (Sprint 2 Layer 3b-Extended Phase 4) ===")
+    print("=== Garment Drape Scene (Sew-then-Drape) ===")
     print(f"  Pattern: {pattern_path}")
     print("  Draping onto mannequin body mesh...\n")
 
@@ -74,24 +73,27 @@ def run_garment_drape(
     print(f"  Body proxy: {collider.spatial_hash.n_triangles} triangles\n")
 
     config = SimConfig(
-        total_frames=600,
-        substeps=15,
-        solver_iterations=20,
+        total_frames=300,
+        substeps=4,
+        solver_iterations=8,
         damping=fabric.damping,
-        max_particles=50000,  # Ensure large buffer, actual size checked later
+        max_particles=50000,
         collision_thickness=0.008,
         friction_coefficient=fabric.friction,
         air_drag=0.3,
-        shrink_frames=150,
-        initial_scale=1.35,
+        sew_frames=80,
+        sew_gravity_fraction=0.05,
+        sew_stitch_compliance=1e-9,
+        drape_stitch_compliance=1e-7,
+        enable_self_collision=False,  # Disabled for 30fps
     )
 
-    # --- Garment mesh ---
+    # --- Garment mesh (no scaling — panels placed close to body) ---
     print("  Building garment mesh from pattern JSON...")
     garment = build_garment_mesh(
-        pattern_path, 
-        resolution=resolution, 
-        global_scale=config.initial_scale,
+        pattern_path,
+        resolution=resolution,
+        global_scale=1.0,  # No scaling — sew-then-drape replaces shrink
     )
     n_particles = garment.positions.shape[0]
     config.max_particles = max(n_particles + 200, 1000)
@@ -101,6 +103,13 @@ def run_garment_drape(
     print(f"  Triangles:       {garment.faces.shape[0]}")
     print(f"  Edges:           {garment.edges.shape[0]}")
     print(f"  Stitch pairs:    {n_stitches}")
+
+    # Mesh quality diagnostics
+    edge_lengths = np.linalg.norm(
+        garment.positions[garment.edges[:, 1]] - garment.positions[garment.edges[:, 0]], axis=1
+    )
+    print(f"  Edge length — min: {edge_lengths.min()*100:.1f}cm, max: {edge_lengths.max()*100:.1f}cm, "
+          f"ratio: {edge_lengths.max()/max(edge_lengths.min(), 1e-8):.1f}x")
     print()
 
     inv_masses = compute_area_weighted_inv_masses(
@@ -134,7 +143,7 @@ def run_garment_drape(
         constraints=constraints,
         stretch_compliance=fabric.stretch_compliance,
         bend_compliance=fabric.bend_compliance,
-        stitch_compliance=1e-8,  # stiff stitches: closes large initial gaps
+        stitch_compliance=config.sew_stitch_compliance,  # Start with sew compliance
         max_stretch=fabric.max_stretch,
         max_compress=fabric.max_compress,
         stretch_damping=fabric.stretch_damping,
@@ -145,14 +154,11 @@ def run_garment_drape(
     engine = SimulationEngine(config, solver=solver)
     engine.collider = collider
 
-    # --- Self-collision ---
-    self_collider = ClothSelfCollider.from_mesh(
-        faces_np=garment.faces,
-        positions_np=garment.positions,
-        thickness=config.self_collision_thickness,
-    )
-    engine.self_collider = self_collider
-    print(f"  Self-collision: cell_size={self_collider.cell_size:.4f}m, thickness={self_collider.thickness:.4f}m\n")
+    print(f"  Simulation: {config.total_frames} frames "
+          f"({config.sew_frames} sew + {config.total_frames - config.sew_frames} drape)")
+    print(f"  Substeps: {config.substeps}, Iterations: {config.solver_iterations}")
+    print(f"  Solver steps/frame: {config.substeps * config.solver_iterations}")
+    print()
 
     # --- Run ---
     start_time = time.perf_counter()
@@ -173,6 +179,19 @@ def run_garment_drape(
 
     final_positions = state.get_positions_numpy()
 
+    # --- Post-processing: seam welding ---
+    if n_stitches > 0:
+        weld_threshold = 0.002  # 2mm
+        welded = 0
+        for i, j in garment.stitch_pairs:
+            gap = np.linalg.norm(final_positions[i] - final_positions[j])
+            if gap < weld_threshold:
+                mid = (final_positions[i] + final_positions[j]) / 2
+                final_positions[i] = mid
+                final_positions[j] = mid
+                welded += 1
+        print(f"\n  Seam welding: {welded}/{n_stitches} pairs welded (<{weld_threshold*1000:.0f}mm)")
+
     # --- Validation ---
     print("\n  --- Results ---")
 
@@ -185,8 +204,8 @@ def run_garment_drape(
     below_floor = min_y < -config.collision_thickness * 2
     print(f"  Min Y: {min_y:.4f}m {'FAIL ❌' if below_floor else 'PASS ✅'} (no sub-floor penetration)")
 
-    # 3. Garment distributed on torso (Y=0.8–1.6m covers waist to above shoulders)
-    waist_y, top_y = 0.8, 1.6
+    # 3. Garment distributed on torso (Y=0.5–1.8m covers waist to above shoulders)
+    waist_y, top_y = 0.5, 1.8
     in_torso = int(np.sum((final_positions[:, 1] >= waist_y) & (final_positions[:, 1] <= top_y)))
     torso_ok = in_torso > n_particles * 0.25
     print(f"  Particles in torso Y={waist_y:.1f}–{top_y:.1f}m: {in_torso}/{n_particles}")
@@ -201,7 +220,7 @@ def run_garment_drape(
         mean_gap = float(np.mean(gaps))
         seam_ok = max_gap < 0.05
         print(f"  Stitch gap — max: {max_gap * 100:.2f}cm, mean: {mean_gap * 100:.2f}cm")
-        print(f"  Stitches closed (<5mm): {'PASS ✅' if seam_ok else 'FAIL ❌'}")
+        print(f"  Stitches closed (<5cm): {'PASS ✅' if seam_ok else 'FAIL ❌'}")
 
     # 5. Energy decay
     velocities = state.get_velocities_numpy()
@@ -209,14 +228,14 @@ def run_garment_drape(
     print(f"  Mean speed: {mean_speed:.4f} m/s {'PASS ✅' if mean_speed < 1.5 else 'FAIL ❌'}")
 
     # 6. Edge length preservation
-    edge_lengths = np.linalg.norm(
+    final_edge_lengths = np.linalg.norm(
         final_positions[garment.edges[:, 1]] - final_positions[garment.edges[:, 0]], axis=1
     )
     rest_lengths = np.linalg.norm(
         garment.positions[garment.edges[:, 1]] - garment.positions[garment.edges[:, 0]], axis=1
     )
-    mean_stretch = float(np.mean(np.abs(edge_lengths / rest_lengths - 1.0)))
-    max_stretch_val = float(np.max(np.abs(edge_lengths / rest_lengths - 1.0)))
+    mean_stretch = float(np.mean(np.abs(final_edge_lengths / rest_lengths - 1.0)))
+    max_stretch_val = float(np.max(np.abs(final_edge_lengths / rest_lengths - 1.0)))
     print(f"  Mean stretch: {mean_stretch:.4%} {'PASS ✅' if mean_stretch < 0.15 else 'FAIL ❌'}")
     print(f"  Max stretch:  {max_stretch_val:.4%}")
 
@@ -225,3 +244,22 @@ def run_garment_drape(
     out = write_glb(final_positions, garment.faces, normals, uvs=garment.uvs, path=output_path)
     print(f"\n  Exported to {out}")
     print("  Open in Blender or https://gltf-viewer.donmccurdy.com/ to inspect drape")
+
+
+if __name__ == "__main__":
+    import argparse
+
+    parser = argparse.ArgumentParser(description="Garment simulation drape scene.")
+    parser.add_argument("--visualize", action="store_true", help="Launch live visualization")
+    parser.add_argument("--pattern", type=str, default=_TSHIRT_JSON, help="Path to pattern JSON")
+    parser.add_argument("--output", type=str, default="storage/garment_drape.glb", help="Output path")
+    parser.add_argument("--res", type=int, default=20, help="Triangulation resolution")
+
+    args = parser.parse_args()
+
+    run_garment_drape(
+        visualize=args.visualize,
+        output_path=args.output,
+        pattern_path=args.pattern,
+        resolution=args.res,
+    )

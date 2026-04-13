@@ -84,11 +84,25 @@ class XPBDSolver:
         """Reset all Lagrange multipliers — called at start of each substep."""
         self.constraints.reset_lambdas()
 
-    def step(self, state: ParticleState, dt: float, rest_length_scale: float = 1.0) -> None:
+    def step(
+        self,
+        state: ParticleState,
+        dt: float,
+        rest_length_scale: float = 1.0,
+        enable_strain_limit: bool = True,
+    ) -> None:
         """
         Perform one solver iteration: distance → bending → stitch → strain limit.
 
         Called `solver_iterations` times per substep.
+
+        Args:
+            state: Current particle state.
+            dt: Substep timestep.
+            rest_length_scale: Multiplier for rest lengths (1.0 = natural).
+            enable_strain_limit: If False, skip the hard strain limit pass.
+                Disabled during sew phase to allow temporary over-compression
+                so seams can close without fighting the strain clamp.
         """
         # Distance constraints (edge length preservation)
         if self.constraints.distance is not None:
@@ -122,8 +136,10 @@ class XPBDSolver:
             )
 
         # Hard strain limit — clamp edges to [1-max_compress, 1+max_stretch] × L₀
+        # Disabled during sew phase to avoid fighting stitch closure
         if (
-            self.constraints.distance is not None
+            enable_strain_limit
+            and self.constraints.distance is not None
             and self._max_stretch is not None
             and self._max_compress is not None
         ):

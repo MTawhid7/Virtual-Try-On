@@ -138,21 +138,21 @@ class TestTriangulatePanelGeometry:
 
 
 class TestTriangulatePanelResolution:
-    """Resolution parameter controls particle density."""
+    """target_edge parameter controls particle density."""
 
-    def test_higher_resolution_more_particles(self):
-        panel_lo = triangulate_panel(SQUARE, resolution=5)
-        panel_hi = triangulate_panel(SQUARE, resolution=20)
+    def test_smaller_target_edge_more_particles(self):
+        panel_lo = triangulate_panel(SQUARE, target_edge=0.10)
+        panel_hi = triangulate_panel(SQUARE, target_edge=0.03)
         assert panel_hi.positions.shape[0] > panel_lo.positions.shape[0]
 
-    def test_higher_resolution_more_faces(self):
-        panel_lo = triangulate_panel(SQUARE, resolution=5)
-        panel_hi = triangulate_panel(SQUARE, resolution=20)
+    def test_smaller_target_edge_more_faces(self):
+        panel_lo = triangulate_panel(SQUARE, target_edge=0.10)
+        panel_hi = triangulate_panel(SQUARE, target_edge=0.03)
         assert panel_hi.faces.shape[0] > panel_lo.faces.shape[0]
 
     def test_minimum_resolution(self):
-        """resolution=2 should still produce a valid mesh (no crash)."""
-        panel = triangulate_panel(RECTANGLE, resolution=2)
+        """Large target_edge should still produce a valid mesh (no crash)."""
+        panel = triangulate_panel(RECTANGLE, target_edge=0.20)
         assert panel.positions.shape[0] >= 4  # at least the boundary vertices
         assert panel.faces.shape[0] >= 1
 

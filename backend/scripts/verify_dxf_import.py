@@ -35,7 +35,7 @@ def verify_dxf(pattern_path: str):
     print(f"\n  Loading pattern: {os.path.basename(pattern_path)}")
 
     try:
-        garment = build_garment_mesh(pattern_path, resolution=25)
+        garment = build_garment_mesh(pattern_path, resolution=40)
         print(f"  ✓ Garment: {len(garment.positions)} vertices, "
               f"{len(garment.faces)} triangles, "
               f"{len(garment.stitch_pairs)} stitch pairs")

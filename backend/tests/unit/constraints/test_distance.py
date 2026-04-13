@@ -41,6 +41,7 @@ class TestDistanceConstraint:
                 state.positions, state.inv_mass, dist_constraints.n_edges,
                 0.0,  # compliance = 0 (rigid)
                 dt,
+                1.0,  # scale = 1.0
             )
 
         # Check distance is close to rest length (1.0)
@@ -74,7 +75,7 @@ class TestDistanceConstraint:
         for _ in range(20):
             dist_constraints.project(
                 state.positions, state.inv_mass, dist_constraints.n_edges,
-                0.0, dt,
+                0.0, dt, 1.0,  # added scale=1.0
             )
 
         p = state.get_positions_numpy()
@@ -106,7 +107,7 @@ class TestDistanceConstraint:
         dt = 1.0 / 60.0
         for _ in range(5):
             dist_rigid.project(
-                state_rigid.positions, state_rigid.inv_mass, 1, 0.0, dt
+                state_rigid.positions, state_rigid.inv_mass, 1, 0.0, dt, 1.0
             )
 
         # Test with high compliance (soft)
@@ -119,7 +120,7 @@ class TestDistanceConstraint:
         )
         for _ in range(5):
             dist_soft.project(
-                state_soft.positions, state_soft.inv_mass, 1, 1.0, dt
+                state_soft.positions, state_soft.inv_mass, 1, 1.0, dt, 1.0
             )
 
         p_rigid = state_rigid.get_positions_numpy()

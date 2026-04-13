@@ -3,6 +3,12 @@ Simulation engine — top-level orchestrator.
 
 Wires together: state → integrator → solver → collision → export.
 This is the entry point for running a simulation programmatically.
+
+Implements a 2-stage simulation loop:
+  Stage 1 (Sew): Reduced gravity, very stiff stitches, no self-collision.
+                  Panels slide together and seams close.
+  Stage 2 (Drape): Full gravity, normal stitch compliance, optional self-collision.
+                   Fabric drapes naturally on the body.
 """
 
 from __future__ import annotations
@@ -86,7 +92,7 @@ def compute_vertex_normals(
 
 class SimulationEngine:
     """
-    Top-level simulation engine.
+    Top-level simulation engine with 2-stage sew-then-drape loop.
 
     Usage:
         engine = SimulationEngine(config)
@@ -101,13 +107,37 @@ class SimulationEngine:
         self.collider = None       # Body / sphere collider (set externally)
         self.self_collider = None  # Cloth self-collider (set externally)
 
-    def step_frame(self, state: ParticleState, rest_length_scale: float = 1.0) -> None:
-        """Run one full frame of simulation (executes multiple substeps)."""
+    def step_frame(self, state: ParticleState, frame: int = -1) -> None:
+        """
+        Run one full frame of simulation (executes multiple substeps).
+
+        Args:
+            frame: Current frame number. Used to determine sew vs drape phase.
+                   -1 means drape phase (default for backward compatibility).
+        """
         config = self.config
+
+        # Determine simulation phase
+        in_sew_phase = (0 <= frame < config.sew_frames)
+        gravity_scale = config.sew_gravity_fraction if in_sew_phase else 1.0
+        enable_strain_limit = not in_sew_phase
+        enable_self_collision = (
+            config.enable_self_collision
+            and not in_sew_phase
+            and self.self_collider is not None
+        )
+
+        # Update stitch compliance based on phase
+        if self.solver is not None and hasattr(self.solver, '_stitch_compliance'):
+            if in_sew_phase:
+                self.solver._stitch_compliance = config.sew_stitch_compliance
+            else:
+                self.solver._stitch_compliance = config.drape_stitch_compliance
+
         # Integrator is stateless, so instantiating here is extremely lightweight
         integrator = Integrator(
             dt=config.substep_dt,
-            gravity=config.gravity,
+            gravity=config.gravity * gravity_scale,
             damping=config.damping,
             max_displacement=config.max_displacement,
             air_drag=config.air_drag,
@@ -121,17 +151,20 @@ class SimulationEngine:
             if self.solver is not None and hasattr(self.solver, 'reset_lambdas'):
                 self.solver.reset_lambdas()
 
-            # 3. Self-collision: one hash rebuild + one kernel dispatch per substep.
-            #    Run BEFORE the iteration loop so that any push-out stretch is
-            #    absorbed and structurally resolved by the distance constraints.
-            if self.self_collider is not None:
+            # 3. Self-collision (only during drape phase, if enabled)
+            if enable_self_collision:
                 self.self_collider.update_hash(state)
                 self.self_collider.resolve(state)
 
             # 4. Solve constraints (XPBD iterations, body collision interleaved)
             if self.solver is not None:
                 for _iteration in range(config.solver_iterations):
-                    self.solver.step(state, config.substep_dt, rest_length_scale)
+                    self.solver.step(
+                        state,
+                        config.substep_dt,
+                        rest_length_scale=1.0,
+                        enable_strain_limit=enable_strain_limit,
+                    )
 
                     # Body collision interleaved — static geometry, safe to repeat
                     if self.collider is not None:
@@ -146,7 +179,7 @@ class SimulationEngine:
 
     def run(self, state: ParticleState, progress_callback=None) -> SimResult:
         """
-        Run the full simulation loop.
+        Run the full simulation loop (sew phase → drape phase).
 
         Args:
             state: Initialized ParticleState with positions loaded.
@@ -163,15 +196,7 @@ class SimulationEngine:
 
         # --- Main simulation loop ---
         for frame in range(config.total_frames):
-            # Dynamic shrink phase calculation
-            if config.shrink_frames > 0 and frame < config.shrink_frames:
-                # Linearly interpolate from initial_scale down to 1.0
-                progress = frame / float(config.shrink_frames)
-                rest_scale = config.initial_scale - (config.initial_scale - 1.0) * progress
-            else:
-                rest_scale = 1.0
-
-            self.step_frame(state, rest_length_scale=rest_scale)
+            self.step_frame(state, frame=frame)
 
             if progress_callback:
                 progress_callback(frame + 1, config.total_frames)

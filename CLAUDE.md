@@ -152,19 +152,21 @@ Garment panels must start **outside** these bounds AND be **wide enough** for se
 
 ## Current State
 
-**Sprint 2 Layer 3b-Extended: Phases 1–4 complete. T-Shirt DXF Pipeline functional. Stitch Topology Fully Verified.**
+**Sprint 2 Refinement (Session 10): 30 FPS Sew-then-Drape Pipeline.**
 
 - **195/195 tests passing.**
-- `mesh/triangulation.py`, `mesh/panel_builder.py`, `constraints/stitch.py` all implemented and unit-tested.
-- `scenes/garment_drape.py` implemented and integration-tested.
-- **Interactive Stitcher**: 2D Matplotlib tool for manual seam definition. Successfully overrides heuristic failures.
-- **3D Verification**: Diagnostic preview with vertex ID inspector ([SHIFT]+Click). All 10 stitch lines verified correct in 3D preview.
-- **Cylindrical Wrapping**: Synchronized math (First Half = Front) for both arms. Fixed Z-depth centering to prevent torso penetration.
-- **Sleeve Stitch Fix**: `sleeve_left` stitches had front/back assignments swapped due to stale `rotation_y=-90°` comment in `import_tshirt.py`. Fixed in both `tshirt.json` and `import_tshirt.py`. Diagnostic: walk `_find_edge_particles` and assert edge max_z > +0.10 for `front` and min_z < -0.01 for `back`.
+- **Mesh Quality:** `triangulation.py` now enforces `min_edge=7mm` to prevent micro-edge instability.
+- **Performance:** Achievement of **30 FPS** target by reducing defaults to 4 substeps and 8 iterations.
+- **Engine Pipeline:** TWO-STAGE assembly loop:
+  1. **Sew (80 frames):** 5% gravity, stiff stitches, no strain limits.
+  2. **Drape (220 frames):** Full gravity, normal compliance, active strain limits.
+- **Stitch Density:** Fully dense seams using Steiner points (automatic subdivision between DXF corners).
+- **Validation:** Added `scripts/validate_pattern.py` for automated mesh quality and stitch density checks.
+- **Current Issues:** Fabric remains visually "stiff" at low substep counts; right sleeve closure is suboptimal in some scenarios.
 - **Next immediate tasks:**
-  1. Execute full "Shrink & Sew" simulation for the t-shirt pattern.
-  2. Evaluate simulation quality (seam closure, interpenetration, shoulder alignment).
-  3. Start Sprint 3 (Web API Layer).
+  1. Improve sleeve "pre-wrap" to assist closure.
+  2. Implement substep-independent compliance scaling.
+  3. Explore Three.js web-based visualization.
 
 **Performance note:** `body_drape` at 60×60 × 16 iterations + self-collision hash rebuild is intentionally slow — performance optimization is deferred. Do not optimize before Sprint 3.
 
