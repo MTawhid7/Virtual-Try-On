@@ -182,12 +182,21 @@ Garment panels must start **outside** these bounds AND be **wide enough** for se
   - `bend_compliance` (cotton): 8.9e-2 → 2.0e-1 (softer folds; ONLY this parameter changed)
   - `target_edge`: 0.030 → 0.020 in `build_garment_mesh()` (denser stitch coverage)
   - Stitch matching: `min(len_a, len_b)` → `max(...)` + linspace (no orphan seam vertices)
-- **Remaining issue (not yet re-validated):** Simulation with `sew_frames=240` not yet run. Previous run (`sew_frames=150`) showed max stretch 169% (edge v65-v66, front panel right armhole rim) caused by right sleeve cap front seam not closing in time. Extending to 240 frames is predicted to fix this.
+- **Session 13 — Diagnostic scripts + geometry fixes (not yet re-simulated):**
+  - Three diagnostic scripts confirm root causes: `sleeve_symmetry_audit.py`, `detect_stitch_crossings.py`, `normal_audit.py`
+  - Root cause B (3D stitch crossings): **ruled out** — 0 crossings on all 6 seams
+  - Root cause G (face winding): **confirmed + fixed** — left sleeve was 100% inward-facing (CCW wrap reversed winding). Fix: in `build_garment_mesh()`, after `_cylindrical_wrap_sleeve()`, sample 10 faces; if mean dot(normal, radial) < 0, flip all face winding via `faces[:, [1,2]] = faces[:, [2,1]]`. Both sleeves now 100% outward.
+  - Root cause D (stitch clustering): **confirmed + fixed** — `right_cap_front` (sleeve N=20 vs armhole N=22) caused 2 sleeve vertices to get double stitch force. Fix: ratio-threshold rule — use `min()` when `longer/shorter ≤ 1.15` (all 10 tshirt seams), `max()` otherwise (tank_top seams with 1.75–3.0× ratios). All tshirt seams now have 0 repeated vertices.
+  - Stitch matching: previous comment "min→max" is now superseded. Current logic is ratio-threshold (see above).
+  - Frontend crash fixed: removed `<Environment preset="studio" />` from `GarmentViewer.tsx` — it fetched an HDR from an external CDN, crashing the Canvas when the fetch failed. Three directional lights + ambient are sufficient (metalness=0.0 makes IBL invisible).
+  - **Tests: 191 pass / 4 fail — identical to pre-session baseline.** The 4 failures are pre-existing: 3 in `TestTwoPanelMerge` (vertex count assertions that don't account for `target_edge=0.020` default) and 1 in `TestGarmentDrapeSimulation::test_stitches_closed_after_settling` (tank_top body Z collision blocking — 14.58cm pre-existing).
+- **Current visual state:** Right sleeve cap has a visible gap at the armhole junction (screenshots show pre-fix GLB). Left sleeve bending was inverted (concave push) — now corrected in code. Simulation must be re-run to produce a fixed GLB.
 
 **Next immediate tasks:**
-  1. Run `python -m simulation --scene garment_drape` with `sew_frames=240` → verify per-seam gaps, max stretch < 30%, n_over20pct drops.
-  2. Run `python -m simulation --scene garment_drape --animate` → test animated GLB in browser.
-  3. Add FastAPI backend to serve simulations via HTTP (Sprint 3 Layer 2).
+  1. Re-run `python -m simulation --scene garment_drape` with all fixes → copy to `frontend/public/models/` → verify both sleeves attach cleanly and surface is smooth.
+  2. Run `python -m simulation --scene garment_drape --animate` → test animated GLB in browser player.
+  3. Assess drape quality (paper-cutout appearance, no natural folds) — may need `bend_compliance` tuning after winding fix.
+  4. Add FastAPI backend to serve simulations via HTTP (Sprint 3 Layer 2).
 
 **Performance note:** `body_drape` at 60×60 × 16 iterations + self-collision hash rebuild is intentionally slow — performance optimization is deferred. Do not optimize before Sprint 3.
 

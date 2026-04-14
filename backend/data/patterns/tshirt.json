@@ -1312,8 +1312,8 @@
       "comment": "Right sleeve cap front-half \u2192 front right armhole",
       "panel_a": "sleeve_right",
       "edge_a": [
-        25,
-        43
+        43,
+        25
       ],
       "panel_b": "front",
       "edge_b": [

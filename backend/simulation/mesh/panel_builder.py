@@ -337,6 +337,27 @@ def build_garment_mesh(
             # This is critical for the placement to clear the body and for
             # the sewing heuristic to calculate non-crossed distances properly.
             world_pos = _cylindrical_wrap_sleeve(world_pos, pspec["placement"])
+
+            # Fix face winding after cylindrical wrap.  The wrap formula rotates
+            # left-arm vs right-arm in opposite directions, which reverses the
+            # CCW winding for one of the sleeves so its bending normals point
+            # inward (concave) instead of outward (convex).  Sample up to 10
+            # faces: if the majority of normals dot negative against the outward
+            # radial from the arm centre, flip all triangles in the panel.
+            arm_cx = float(pspec["placement"]["position"][0])
+            arm_cz = float(pspec["placement"]["position"][2])
+            n_sample = min(10, len(panel_local.faces))
+            sf = panel_local.faces[:n_sample]
+            sv0, sv1, sv2 = world_pos[sf[:, 0]], world_pos[sf[:, 1]], world_pos[sf[:, 2]]
+            snormals  = np.cross(sv1.astype(np.float64) - sv0, sv2.astype(np.float64) - sv0)
+            scents    = ((sv0 + sv1 + sv2) / 3.0).astype(np.float64)
+            sradial   = scents - np.array([arm_cx, 0.0, arm_cz])
+            sradial[:, 1] = 0.0
+            srad_norm = np.linalg.norm(sradial, axis=1, keepdims=True)
+            srad_norm = np.maximum(srad_norm, 1e-9)
+            sdots     = np.sum(snormals * (sradial / srad_norm), axis=1)
+            if sdots.mean() < 0:
+                panel_local.faces[:, [1, 2]] = panel_local.faces[:, [2, 1]]
         panels_local.append(panel_local)
         panels_world_pos.append(world_pos)
         panel_ids.append(pspec["id"])
@@ -380,10 +401,18 @@ def build_garment_mesh(
         local_a = _find_edge_particles(panels_local[pa_idx], ea[0], ea[1])
         local_b = _find_edge_particles(panels_local[pb_idx], eb[0], eb[1])
 
-        # Match by relative position along edge — use the longer edge's count so
-        # every vertex on both edges gets a stitch partner (no orphan seam tips).
-        # The shorter edge is resampled via np.linspace to cover the full span.
-        n_pts = max(len(local_a), len(local_b))
+        # Match by relative position along edge.  Use max() so every vertex on
+        # both edges gets at least one stitch partner (no orphan seam tips).
+        # When the two edges differ by ≤ 15 % (ratio ≤ 1.15), switch to min()
+        # instead: the difference is only 1–2 vertices and using min() avoids
+        # the shorter side being oversampled (double stitch force on those
+        # vertices causes surface ridges on tight-mesh seams like sleeve caps).
+        len_a, len_b = len(local_a), len(local_b)
+        longer, shorter = max(len_a, len_b), min(len_a, len_b)
+        if shorter > 0 and longer / shorter <= 1.15:
+            n_pts = shorter   # tiny imbalance — avoid clustering
+        else:
+            n_pts = longer    # large imbalance — keep full coverage
         if n_pts == 0:
             continue
 

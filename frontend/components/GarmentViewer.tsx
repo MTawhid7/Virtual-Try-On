@@ -4,7 +4,6 @@ import { Suspense, useEffect, useMemo, useRef } from "react";
 import { Canvas, useThree, useFrame } from "@react-three/fiber";
 import {
   OrbitControls,
-  Environment,
   useGLTF,
 } from "@react-three/drei";
 import * as THREE from "three";
@@ -158,9 +157,6 @@ function Model({
 function StudioLighting() {
   return (
     <>
-      {/* HDR environment for reflections + ambient fill */}
-      <Environment preset="studio" />
-
       {/* Key light — upper-right-front */}
       <directionalLight position={[2.5, 4, 3]} intensity={2.2} />
 
