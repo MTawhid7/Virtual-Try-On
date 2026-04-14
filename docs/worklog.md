@@ -4,6 +4,171 @@ This document organizes progress history, encountered issues, structural adjustm
 
 ---
 
+### 📅 April 14, 2026 (PM): Sprint 3 Session 13 — Simulation Re-run & Visual Validation
+
+**Status:** 🔶 In Progress — geometry fixes validated; shoulder gap and draping remain  
+**Focus:** Re-running simulation with all Session 13 fixes applied; visual verification.
+
+---
+
+#### Current Visual State (post-fix GLB)
+
+| Area | Status | Notes |
+|------|--------|-------|
+| Right sleeve surface | ✅ Resolved | Even surface, no ridges; uneven surface fully eliminated |
+| Side seams (left & right) | ✅ Closed | Max 0.9–1.2cm; visually flush |
+| Shoulder seams | ✅ Closed | Max 1.3–2.3cm; clean at back/front shoulder transitions |
+| Sleeve cap (both sides) | ✅ Closed | Max 2.0–2.1cm; seam attaches correctly |
+| Shoulder-sleeve gap | ⚠ Visible | Ridge visible at armhole junction where sleeve cap meets shoulder seam — subtle but visible from oblique angles |
+| Body conformity | ⚠ Stiff | Garment sits on body surface but lacks natural fold depth; paper-cutout appearance from most angles |
+| Drape quality | ⚠ Flat | Gravity folds present but shallow; `bend_compliance=2e-1` is very soft — may need tightening |
+
+#### Simulation Metrics (current validated GLB)
+
+| Metric | Value | Threshold | Status |
+|--------|-------|-----------|--------|
+| Max seam gap (all seams) | 3.57cm | <5cm | ✅ |
+| Mean seam gap | 0.54cm | — | ✅ |
+| Max stretch | 84.6% | — | ⚠ (was 169.6%) |
+| Mean stretch | 5.7% | — | ✅ |
+| Mean particle speed | 0.017 m/s | — | ✅ |
+| NaN check | PASS | — | ✅ |
+| Simulation time | 48.7s (125ms/frame) | — | ✅ |
+
+Worst-stretch edge: `v[3477]–v[3478]` both in `sleeve_left`, at Y=1.26m (underarm region of left sleeve cylinder). The 84.6% stretch is localised at the underarm seam where the cylindrical wrap creates a small radius of curvature; it does not affect the visual appearance.
+
+#### Outstanding Issues
+
+**1. Shoulder-sleeve gap / armhole ridge**
+A subtle gap and surface ridge is visible at the point where the sleeve cap meets the shoulder seam (both sides, slightly more prominent on the viewer's right = mannequin's left). This is geometrically distinct from the earlier surface unevenness (now fixed). Likely causes to investigate:
+- The armhole curve in the pattern does not perfectly match the 3D cylinder cut — the DXF-imported armhole shape was designed for a flat 2D seam allowance, not for a cylindrical wrap
+- The sew phase body collision (`collision_thickness=0.012`) pushes sleeve cap particles away from the armhole rim during sewing, preventing final closure
+- The cap-split vertex (v25/v31) sits at the very shoulder peak; the transition from cap seam to shoulder seam may create a fold crease
+
+**2. Body conformity / stiffness**
+The garment drapes on the body surface correctly but lacks the natural weight and fold depth of real cotton:
+- `bend_compliance=2e-1` makes the cloth very soft in the XPBD sense (bending is nearly unconstrained) — counter-intuitively, very high compliance with low mass produces a floating/ballooned look rather than natural sag
+- The 150 drape frames may not be sufficient for heavier cloth to settle fully around curved surfaces
+- Self-collision is disabled — cloth panels passing through each other is undetected
+
+**3. Drape quality (flat appearance)**
+The garment looks like a paper-cutout attached to the surface. Natural folding and wrinkling requires either tighter bending compliance (so cloth has structural stiffness that buckles under gravity) or a longer settle phase.
+
+#### Key Insights Gained This Subsession
+
+**The old artifact was the primary culprit.** All previous sessions of visual analysis were spent on a GLB that predated the face winding and clustering fixes. The simulation had not been re-run in over a session. Going forward: re-run simulation immediately after any `panel_builder.py` or `tshirt.json` change and overwrite the frontend GLB before visual review.
+
+**Face winding fix eliminated the right sleeve surface irregularity completely.** The 100% inverted normals on the left sleeve (viewed from front = right side) were causing the bending constraint to resist correct fold formation, creating the uneven surface pattern visible in previous screenshots. After the fix, the surface is completely smooth at both armholes.
+
+**Stitch clustering (Root D) was contributing to micro-ridges.** Even 10% clustering (2 vertices with double force) creates localised pulling artefacts. The ratio-threshold fix (using `min()` for small imbalances) eliminates this class of defect entirely.
+
+**Max stretch metric is not a reliable quality indicator for cylinder seams.** The 84.6% worst stretch is not at the armhole seam (which would indicate a problem) but at an underarm cylinder edge. Cylinder edge particles at small radius naturally accumulate stretch from the wrap geometry — this is expected and does not affect visual quality.
+
+#### Plan for Next Session
+
+1. **Shoulder-sleeve gap diagnosis** — run a targeted diagnostic: compute the 3D distance between shoulder seam particles and sleeve cap particles at the cap-split vertex after sewing. If gap > 3mm, investigate whether body collision is blocking final closure. If gap < 3mm, the ridge is a geometry/curvature mismatch at the DXF armhole shape, not a simulation failure.
+
+2. **Draping improvement** — test `bend_compliance` sweep: 2e-1 (current) → 1e-1 → 5e-2 → 2e-2. Target: visible fold lines under gravity without simulation instability. Each sweep takes ~50s.
+
+3. **Animated GLB end-to-end** — run `python -m simulation --scene garment_drape --animate` and load the animated GLB in the browser player. Verify morph-target playback, SEW/DRAPE phase marker, and scrubber seek.
+
+4. **FastAPI backend** — Sprint 3 Layer 2: HTTP endpoint to trigger simulation from the frontend.
+
+---
+
+### 📅 April 14, 2026: Sprint 3 Session 13 — Sleeve Geometry Diagnostics, Winding Fix, Stitch Clustering Fix, Viewer Crash Fix
+
+**Status:** 🔶 In Progress — fixes committed, simulation not yet re-run with new GLB
+**Focus:** Diagnosing and fixing right sleeve surface irregularities and left sleeve bending inversion. Fixing frontend viewer crash.
+
+---
+
+#### Work Completed
+
+**Three diagnostic scripts created and run (`backend/scripts/`):**
+
+| Script | Purpose | Verdict |
+|--------|---------|---------|
+| `sleeve_symmetry_audit.py` | 2D arc lengths, particle counts, clustering, cap split position, mass asymmetry, underarm twist | Root cause D (clustering) and F (twist gradient) flagged |
+| `detect_stitch_crossings.py` | 3D stitch crossing detection, adjacent-pair force angle | Root cause B RULED OUT — 0 crossings on all 6 seams |
+| `normal_audit.py` | Face normal direction vs outward radial for each sleeve | Root cause G CONFIRMED for LEFT sleeve (100% inverted) |
+
+**Diagnostic findings — per root cause:**
+
+| Root Cause | Finding | Status |
+|------------|---------|--------|
+| A — asymmetric pair count | Pairs balanced: 22/22/22 right, 22/22/22 left | ✅ Ruled out |
+| B — 3D stitch crossings | Zero crossings on all 6 seams | ✅ Ruled out |
+| C — cap split not at midpoint | v25 at 50.4%, v31 at 49.6% — within 1% | ✅ Ruled out |
+| D — stitch clustering | `right_cap_front`: sleeve N=20 vs armhole N=22; `max()` caused 2 vertices to get double stitch force (10%) | ⚠ Fixed |
+| E — mass asymmetry at seam | Sleeve inv_mass ~1.35× armhole — within acceptable range | ✅ Ruled out |
+| F — underarm azimuthal twist | 44.7° twist gradient on BOTH sleeves symmetrically — inherent to cylindrical wrap geometry; armpit converges to Δθ=0° | ✅ Symmetric, acceptable |
+| G — face winding inversion | LEFT sleeve: **100% inward-facing normals** (0/496 outward). Right sleeve: 100% outward. Left arm wrap rotates CCW, reversing triangle winding | ⚠ Fixed |
+
+**Fixes implemented in `backend/simulation/mesh/panel_builder.py`:**
+
+*Fix 1 — Face winding correction after cylindrical wrap:*
+After `_cylindrical_wrap_sleeve()`, sample up to 10 faces and compute their dot product with the outward radial direction from the arm centre. If the mean dot is negative (majority pointing inward), flip all triangle windings: `panel_local.faces[:, [1, 2]] = panel_local.faces[:, [2, 1]]`. This corrects the left sleeve, which had 100% inverted bending normals causing bending forces to push cloth concave instead of convex.
+
+*Fix 2 — Stitch matching with anti-clustering threshold:*
+Changed from unconditional `n_pts = max(len_a, len_b)` to a ratio-based rule: if `longer / shorter ≤ 1.15` (small imbalance), use `min()` to avoid oversampling the shorter edge; otherwise use `max()` to preserve full seam coverage. This correctly applies `min()` to all 10 tshirt seams (ratios 1.00–1.10) — eliminating all vertex repetition — while keeping `max()` for the tank_top's asymmetric seams (ratios 1.75–3.0) so those tests continue to pass.
+
+Verification:
+- All 10 tshirt seams: zero repeated vertices, zero clustering
+- Tank_top test `test_stitches_closed_after_settling`: still fails at 14.58cm — confirmed pre-existing (same result without any of our changes)
+- Full test suite: 191 pass / 4 fail — identical to pre-session baseline
+
+**Frontend viewer crash fixed (`frontend/components/GarmentViewer.tsx`):**
+
+Removed `<Environment preset="studio" />` from `StudioLighting`. The drei `Environment` component fetches `studio_small_03_1k.hdr` from an external CDN (`market-assets.fra1.cdn.digitaloceanspaces.com`) at runtime. When this fetch fails (network unavailable, CDN down), it throws a top-level error that crashes the entire Three.js Canvas — not a graceful degradation, a full white-screen Runtime Error. The three directional lights (key 2.2 / fill 0.9 / rim 0.6) + ambient (0.3) already produce complete studio-quality lighting; material metalness is 0.0 so IBL specular was contributing nothing visible.
+
+Also noted: `THREE.Clock` deprecation warning from R3F 9.5.0 using deprecated Three.js r183 API (`THREE.Clock` → `THREE.Timer`). This is an upstream R3F issue — harmless, no action taken.
+
+---
+
+#### Visual Issues Remaining (from screenshots, pre-fix GLB)
+
+The screenshots show the garment GLB from before this session's fixes. Visible problems:
+
+1. **Right sleeve cap not closing** — gap visible at the right shoulder/armhole junction. The sleeve cap front-half seam edge shows an unstitched section. The previous stitch direction fix (Session 12) closed most of the seam but some gap remains visible in the GLB.
+2. **Right side seam open** — a vertical gap is visible along the right torso side. The seam edge runs from armpit to hip without full closure.
+3. **Left sleeve normal inversion** — now fixed in code; left sleeve bending normals were pointing inward, which would cause concave surface distortion during drape. Not yet visible in the re-rendered result.
+
+These screenshots reflect the **pre-fix state**. The simulation needs to be re-run to produce a new GLB that incorporates:
+- Face winding fix (left sleeve)
+- Anti-clustering stitch matching (tshirt cap seams)
+- The stitch direction fix from Session 12 (tshirt.json `edge_a [43→25]`)
+
+---
+
+#### Insights Gained
+
+**Cylindrical wrap reverses winding for one arm.** The right arm uses `angle = -2π × u - π/2` (clockwise rotation); the left arm uses `angle = +2π × u + π/2` (counterclockwise). Because the triangulator produces CCW triangles in the flat XZ plane, the clockwise wrap for the right arm preserves outward-facing normals while the counterclockwise wrap for the left arm flips them. The fix must be applied at mesh-build time (before bending rest angles are computed) not at simulation time.
+
+**`Environment preset` has a hidden hard network dependency.** The drei component looks innocuous — one JSX line — but it makes a blocking fetch to an external CDN at scene mount time. In offline/restricted environments this crashes the viewer completely. IBL reflections on low-metalness materials are visually negligible; the directional light rig is sufficient. Any drei `Environment preset` should be treated as an external CDN dependency and either hosted locally or removed.
+
+**`max()` vs `min()` for stitch pair count is a tension between coverage and clustering.** Large seam-length asymmetries (3:1 ratio like tank_top's left side seam at 5 vs 15 particles) require `max()` to ensure all seam vertices get pulled. Small asymmetries (1.1:1 like tshirt cap seams at 20 vs 22) should use `min()` to avoid force amplification on the shorter edge. A ratio threshold of 1.15 cleanly separates these two regimes in the current patterns.
+
+**Pre-existing test failures are misleading.** CLAUDE.md described "4 pre-existing failures in TestGarmentDrapeSimulation" but the actual 4 failures are: 3 in `TestTwoPanelMerge` (unit tests that compare `build_garment_mesh(resolution=10)` vertex counts against `triangulate_panel(resolution=10)` without accounting for the `target_edge=0.020` default) and 1 in `TestGarmentDrapeSimulation::test_stitches_closed_after_settling` (tank_top seams inside body Z-extent). None of these are caused by our changes.
+
+---
+
+#### Next Steps
+
+1. **Re-run simulation** — `python -m simulation --scene garment_drape` with all three fixes in place. Copy GLB to `frontend/public/models/`. Visually confirm:
+   - Right sleeve cap closes cleanly at the armhole
+   - Left sleeve surface is smooth (no concave bending artifact)
+   - Both side seams close completely
+   - Right and left sleeves are symmetric
+
+2. **Run animated export** — `python -m simulation --scene garment_drape --animate` to test the morph-target animated GLB in the browser player.
+
+3. **Address remaining garment drape quality** — the garment drapes flat (paper-cutout appearance, no natural folds). The `bend_compliance` is currently 2e-1 (very soft). With correct face normals on both sleeves, bending constraints will now resist correctly; re-assess fold quality after re-running.
+
+4. **FastAPI backend** — Sprint 3 Layer 2: HTTP endpoint to trigger simulation from the frontend (pattern selector + fabric picker).
+
+---
+
 ### 📅 April 13, 2026 (Session 12): Structured Diagnosis — Animated GLB Pipeline + Physics Bug Hunting
 
 **Status:** 🔶 Animated pipeline code-complete; right-sleeve seam closure fix staged but not yet validated.
@@ -198,7 +363,7 @@ This document organizes progress history, encountered issues, structural adjustm
 
 **Interactive Stitch Editor (`scripts/interactive_stitcher.py`) — NEW TOOL**
 - Developed a Matplotlib-based GUI for manual stitch definition.
-- **Features:** 
+- **Features:**
   - Displays all garment panels side-by-side with corner highlighting (yellow "landmarks").
   - 4-Click Workflow: Select Start/End of Edge A, then Start/End of Edge B.
   - Automatic JSON synchronization: Saves selections directly to the pattern file.
@@ -212,7 +377,7 @@ This document organizes progress history, encountered issues, structural adjustm
 
 **Cylindrical Sleeve Synchronization (`simulation/mesh/panel_builder.py`)**
 - **Z-Depth Centering:** Corrected the arm center (`arm_cz`) from 0.175m to **0.05m** to align with the midpoint of the front (0.20) and back (-0.10) panels, preventing torso intersection.
-- **Phase-Shift Standardization:** Synchronized the left and right arm wrapping math. 
+- **Phase-Shift Standardization:** Synchronized the left and right arm wrapping math.
   - Standard: First half of sleeve (`u: 0.0 → 0.5`) always wraps toward the **FRONT (+Z)**.
   - Standard: Second half (`u: 0.5 → 1.0`) always wraps toward the **BACK (-Z)**.
 - **Horizontal Clearance:** Pushed initial sleeve placements to **X=±0.75m** in the importer to give the tailor more visual "breathing room" during setup.
@@ -362,8 +527,8 @@ Mean stretch:               896.75% — FAIL ❌ (target <15%)
 #### Ongoing Issues & Insights
 
 - **The Armhole Topological Identification Failure:** The sleeves were successfully identified and their caps (curves) isolated. However, identifying where to stitch the cap on the main body (`front` and `back` panels) triggered an issue with heuristic endpoint targeting.
-- The `front` panel contains a continuous path combining the *shoulder seam* and the *armhole scoop*. 
-- A geometric analysis was implemented using "max-Euclidean distance to the inner-shoulder-to-underarm chord" (Ramer-Douglas-Peucker principles) to isolate the `outer_shoulder` point (the corner between the shoulder seam and the armhole curve). 
+- The `front` panel contains a continuous path combining the *shoulder seam* and the *armhole scoop*.
+- A geometric analysis was implemented using "max-Euclidean distance to the inner-shoulder-to-underarm chord" (Ramer-Douglas-Peucker principles) to isolate the `outer_shoulder` point (the corner between the shoulder seam and the armhole curve).
 - **Present Failure:** The visual output reveals that this heuristic failed to catch the true corner on this specific Polo pattern. Due to pattern shaping, the deepest part of the armhole scoop or the neck may have been mathematically further from the chord, leading to the stitch anchors snapping back to the inner neck. Consequently, sleeves are stitched diagonally from the underarm all the way across the torso up to the collarbase!
 
 #### Future Plan (Next Session)
@@ -1437,95 +1602,3 @@ Even with correct key arithmetic, a 65536-bucket table with ~300K entries has ge
 - **Post-Collision Damping Hooks:** Explicitly introduce and profile strict velocity clamps combating unnatural bounce thresholds natively inside the main loop iteration solver as complexity mounts.
 
 ---
-
-### 📅 April 14, 2026: Sprint 3 Session 13 — Sleeve Geometry Diagnostics, Winding Fix, Stitch Clustering Fix, Viewer Crash Fix
-
-**Status:** 🔶 In Progress — fixes committed, simulation not yet re-run with new GLB  
-**Focus:** Diagnosing and fixing right sleeve surface irregularities and left sleeve bending inversion. Fixing frontend viewer crash.
-
----
-
-#### Work Completed
-
-**Three diagnostic scripts created and run (`backend/scripts/`):**
-
-| Script | Purpose | Verdict |
-|--------|---------|---------|
-| `sleeve_symmetry_audit.py` | 2D arc lengths, particle counts, clustering, cap split position, mass asymmetry, underarm twist | Root cause D (clustering) and F (twist gradient) flagged |
-| `detect_stitch_crossings.py` | 3D stitch crossing detection, adjacent-pair force angle | Root cause B RULED OUT — 0 crossings on all 6 seams |
-| `normal_audit.py` | Face normal direction vs outward radial for each sleeve | Root cause G CONFIRMED for LEFT sleeve (100% inverted) |
-
-**Diagnostic findings — per root cause:**
-
-| Root Cause | Finding | Status |
-|------------|---------|--------|
-| A — asymmetric pair count | Pairs balanced: 22/22/22 right, 22/22/22 left | ✅ Ruled out |
-| B — 3D stitch crossings | Zero crossings on all 6 seams | ✅ Ruled out |
-| C — cap split not at midpoint | v25 at 50.4%, v31 at 49.6% — within 1% | ✅ Ruled out |
-| D — stitch clustering | `right_cap_front`: sleeve N=20 vs armhole N=22; `max()` caused 2 vertices to get double stitch force (10%) | ⚠ Fixed |
-| E — mass asymmetry at seam | Sleeve inv_mass ~1.35× armhole — within acceptable range | ✅ Ruled out |
-| F — underarm azimuthal twist | 44.7° twist gradient on BOTH sleeves symmetrically — inherent to cylindrical wrap geometry; armpit converges to Δθ=0° | ✅ Symmetric, acceptable |
-| G — face winding inversion | LEFT sleeve: **100% inward-facing normals** (0/496 outward). Right sleeve: 100% outward. Left arm wrap rotates CCW, reversing triangle winding | ⚠ Fixed |
-
-**Fixes implemented in `backend/simulation/mesh/panel_builder.py`:**
-
-*Fix 1 — Face winding correction after cylindrical wrap:*  
-After `_cylindrical_wrap_sleeve()`, sample up to 10 faces and compute their dot product with the outward radial direction from the arm centre. If the mean dot is negative (majority pointing inward), flip all triangle windings: `panel_local.faces[:, [1, 2]] = panel_local.faces[:, [2, 1]]`. This corrects the left sleeve, which had 100% inverted bending normals causing bending forces to push cloth concave instead of convex.
-
-*Fix 2 — Stitch matching with anti-clustering threshold:*  
-Changed from unconditional `n_pts = max(len_a, len_b)` to a ratio-based rule: if `longer / shorter ≤ 1.15` (small imbalance), use `min()` to avoid oversampling the shorter edge; otherwise use `max()` to preserve full seam coverage. This correctly applies `min()` to all 10 tshirt seams (ratios 1.00–1.10) — eliminating all vertex repetition — while keeping `max()` for the tank_top's asymmetric seams (ratios 1.75–3.0) so those tests continue to pass.
-
-Verification:
-- All 10 tshirt seams: zero repeated vertices, zero clustering
-- Tank_top test `test_stitches_closed_after_settling`: still fails at 14.58cm — confirmed pre-existing (same result without any of our changes)
-- Full test suite: 191 pass / 4 fail — identical to pre-session baseline
-
-**Frontend viewer crash fixed (`frontend/components/GarmentViewer.tsx`):**
-
-Removed `<Environment preset="studio" />` from `StudioLighting`. The drei `Environment` component fetches `studio_small_03_1k.hdr` from an external CDN (`market-assets.fra1.cdn.digitaloceanspaces.com`) at runtime. When this fetch fails (network unavailable, CDN down), it throws a top-level error that crashes the entire Three.js Canvas — not a graceful degradation, a full white-screen Runtime Error. The three directional lights (key 2.2 / fill 0.9 / rim 0.6) + ambient (0.3) already produce complete studio-quality lighting; material metalness is 0.0 so IBL specular was contributing nothing visible.
-
-Also noted: `THREE.Clock` deprecation warning from R3F 9.5.0 using deprecated Three.js r183 API (`THREE.Clock` → `THREE.Timer`). This is an upstream R3F issue — harmless, no action taken.
-
----
-
-#### Visual Issues Remaining (from screenshots, pre-fix GLB)
-
-The screenshots show the garment GLB from before this session's fixes. Visible problems:
-
-1. **Right sleeve cap not closing** — gap visible at the right shoulder/armhole junction. The sleeve cap front-half seam edge shows an unstitched section. The previous stitch direction fix (Session 12) closed most of the seam but some gap remains visible in the GLB.
-2. **Right side seam open** — a vertical gap is visible along the right torso side. The seam edge runs from armpit to hip without full closure.
-3. **Left sleeve normal inversion** — now fixed in code; left sleeve bending normals were pointing inward, which would cause concave surface distortion during drape. Not yet visible in the re-rendered result.
-
-These screenshots reflect the **pre-fix state**. The simulation needs to be re-run to produce a new GLB that incorporates:
-- Face winding fix (left sleeve)
-- Anti-clustering stitch matching (tshirt cap seams)
-- The stitch direction fix from Session 12 (tshirt.json `edge_a [43→25]`)
-
----
-
-#### Insights Gained
-
-**Cylindrical wrap reverses winding for one arm.** The right arm uses `angle = -2π × u - π/2` (clockwise rotation); the left arm uses `angle = +2π × u + π/2` (counterclockwise). Because the triangulator produces CCW triangles in the flat XZ plane, the clockwise wrap for the right arm preserves outward-facing normals while the counterclockwise wrap for the left arm flips them. The fix must be applied at mesh-build time (before bending rest angles are computed) not at simulation time.
-
-**`Environment preset` has a hidden hard network dependency.** The drei component looks innocuous — one JSX line — but it makes a blocking fetch to an external CDN at scene mount time. In offline/restricted environments this crashes the viewer completely. IBL reflections on low-metalness materials are visually negligible; the directional light rig is sufficient. Any drei `Environment preset` should be treated as an external CDN dependency and either hosted locally or removed.
-
-**`max()` vs `min()` for stitch pair count is a tension between coverage and clustering.** Large seam-length asymmetries (3:1 ratio like tank_top's left side seam at 5 vs 15 particles) require `max()` to ensure all seam vertices get pulled. Small asymmetries (1.1:1 like tshirt cap seams at 20 vs 22) should use `min()` to avoid force amplification on the shorter edge. A ratio threshold of 1.15 cleanly separates these two regimes in the current patterns.
-
-**Pre-existing test failures are misleading.** CLAUDE.md described "4 pre-existing failures in TestGarmentDrapeSimulation" but the actual 4 failures are: 3 in `TestTwoPanelMerge` (unit tests that compare `build_garment_mesh(resolution=10)` vertex counts against `triangulate_panel(resolution=10)` without accounting for the `target_edge=0.020` default) and 1 in `TestGarmentDrapeSimulation::test_stitches_closed_after_settling` (tank_top seams inside body Z-extent). None of these are caused by our changes.
-
----
-
-#### Next Steps
-
-1. **Re-run simulation** — `python -m simulation --scene garment_drape` with all three fixes in place. Copy GLB to `frontend/public/models/`. Visually confirm:
-   - Right sleeve cap closes cleanly at the armhole
-   - Left sleeve surface is smooth (no concave bending artifact)
-   - Both side seams close completely
-   - Right and left sleeves are symmetric
-
-2. **Run animated export** — `python -m simulation --scene garment_drape --animate` to test the morph-target animated GLB in the browser player.
-
-3. **Address remaining garment drape quality** — the garment drapes flat (paper-cutout appearance, no natural folds). The `bend_compliance` is currently 2e-1 (very soft). With correct face normals on both sleeves, bending constraints will now resist correctly; re-assess fold quality after re-running.
-
-4. **FastAPI backend** — Sprint 3 Layer 2: HTTP endpoint to trigger simulation from the frontend (pattern selector + fabric picker).
-

@@ -112,7 +112,7 @@ python -m pytest tests/integration/ -v
 | **Sprint 2, Sew-then-Drape** | ✅ | Implemented a 30 FPS pipeline with boundary resampling (min 7mm edge), dense stitching (Steiner points), and a two-stage assembly loop. Seam welding and pattern validation added. |
 | **Sprint 3, Viewer** | ✅ | Next.js 16 + React Three Fiber viewer with studio lighting, OrbitControls, cloth/body material assignment, model selector, wireframe toggle, background toggle, cloth color swatches. |
 | **Sprint 3, Animated GLB** | 🔶 | Raw glTF 2.0 morph-target animated export (`write_glb_animated()`). Frontend `AnimationMixer` player with play/pause, timeline scrubber, SEW/DRAPE phase badge, speed selector. Geometry fixes applied (face winding, stitch clustering); re-simulation pending. |
-| **Sprint 3, Geometry Debug** | 🔶 | Systematic root-cause analysis of right sleeve surface irregularities. Scripts: `sleeve_symmetry_audit.py`, `detect_stitch_crossings.py`, `normal_audit.py`. Fixed: left sleeve face-winding inversion (Root G), stitch double-force clustering (Root D). Ruled out: 3D stitch crossings (Root B), arc length asymmetry (Root A/C), mass bias (Root E). |
+| **Sprint 3, Geometry Debug** | 🔶 | Root-cause analysis scripts + fixes validated. Right sleeve surface irregularity resolved. Remaining: shoulder-sleeve gap at armhole junction and body-conformity stiffness. Max seam gap 3.57cm, max stretch 84.6% (was 169.6%). |
 | **Sprint 3, Backend API** | ⬜ | FastAPI layer to serve simulations via HTTP (pattern selector + fabric picker → run simulation). |
 | **Sprint 4** | ⬜ | Integration, polish, end-to-end testing |
 

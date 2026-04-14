@@ -152,50 +152,33 @@ Garment panels must start **outside** these bounds AND be **wide enough** for se
 
 ## Current State
 
-**Sprint 3 Session 12: Structured Diagnosis + Animated GLB Pipeline.**
+**Sprint 3 Session 13: Sleeve geometry fixed, simulation re-validated.**
 
-- **191/195 tests passing.** (4 pre-existing failures in `TestGarmentDrapeSimulation` — tank_top panels start inside body Z-extent causing collision direction ambiguity; unrelated to Sprint 3 changes.)
-- **Animated GLB pipeline complete (code-complete, not yet run-validated):**
-  - `engine.run()` accepts `record_every_n_frames` → captures `frame_positions` in `SimResult`
-  - `write_glb_animated()` in `export/gltf_writer.py` — raw glTF 2.0 morph-target writer (no deps beyond `json`/`struct`). K keyframes → K morph targets + identity weight animation clip.
-  - `garment_drape.py --animate` flag exports `garment_drape_animated.glb` alongside static GLB
-  - `simulation/__main__.py` now routes `--animate` through to `run_garment_drape()`
-- **Frontend animation player complete (code-complete, not yet run-validated):**
-  - `GarmentViewer.tsx` — Three.js `AnimationMixer` + `useFrame` playback with seek support
-  - `ViewerControls.tsx` — Play/pause, timeline scrubber, SEW/DRAPE phase badge (`sew_frames/total_frames = 240/390`), speed selector (0.25×/0.5×/1×/2×)
-  - `page.tsx` — Full animation state with `useCallback` stable callbacks, model-change reset
-  - `reactStrictMode: false` in `next.config.ts` (prevents double-mount WebGL context loss in React 19 dev)
-- **Diagnosis infrastructure added:**
-  - `GarmentMesh.stitch_seam_ids` field in `panel_builder.py` — per-stitch seam label from JSON `comment`
-  - `scripts/diagnose_tshirt.py` — pre-simulation mesh check: panel placement vs body surface, per-seam initial gap stats, edge quality
-  - Per-seam gap breakdown in `garment_drape.py` validation section
-  - Per-panel max stretch with worst-edge location in `garment_drape.py`
-- **Critical bug fixed: `boundary_indices` not path-ordered in `triangulate_panel()`**
-  - `poly_subdiv` layout is `[original_verts, steiner_points]` (all Steiners after all original verts)
-  - `boundary_indices = tree.query(poly_subdiv)` gave original-corner-first ordering → `_find_edge_particles()` only collected polygon corners, missing all Steiner points
-  - Fix: `tree.query(poly_subdiv[path_indices])` (path-ordered, interleaved) → side seams now 27 pairs (was 6), total 178 (was 122)
+- **Tests: 191 pass / 4 fail.** Pre-existing failures unchanged: 3 in `TestTwoPanelMerge` (vertex count assertions mismatched to `target_edge=0.020` default) and 1 in `TestGarmentDrapeSimulation::test_stitches_closed_after_settling` (tank_top body Z collision — 14.58cm pre-existing).
+- **Simulation metrics (current GLB — all 10 seams pass):**
+  - Max seam gap: **3.57cm** (right underarm — inherent to cylindrical wrap geometry)
+  - Mean seam gap: 0.54cm
+  - Max stretch: **84.6%** (was 169.6%; worst edge is now inside left sleeve underarm, not armhole rim)
+  - Mean stretch: 5.7%  |  Mean speed: 0.017 m/s  |  Runtime: 48.7s (124.8ms/frame)
+- **Geometry fixes applied and validated (panel_builder.py):**
+  - Face winding correction after cylindrical wrap: samples 10 faces, flips if mean dot(normal, radial) < 0. Both sleeves now 100% outward-facing.
+  - Stitch clustering fix: ratio-threshold rule (`min()` when `longer/shorter ≤ 1.15`, `max()` otherwise). All 10 tshirt seams: 0 repeated vertices.
 - **Physics parameters (current):**
-  - `sew_frames`: 150 → **240** (right sleeve cap front needed ~214 frames to close)
-  - `total_frames`: 320 → **390** (keeps 150 drape frames)
-  - `collision_thickness`: 0.008 → 0.012 (prevents tunneling during sew)
-  - `sew_stitch_compliance`: 1e-9 → 1e-10 (10× stiffer sew stitches)
-  - `bend_compliance` (cotton): 8.9e-2 → 2.0e-1 (softer folds; ONLY this parameter changed)
-  - `target_edge`: 0.030 → 0.020 in `build_garment_mesh()` (denser stitch coverage)
-  - Stitch matching: `min(len_a, len_b)` → `max(...)` + linspace (no orphan seam vertices)
-- **Session 13 — Diagnostic scripts + geometry fixes (not yet re-simulated):**
-  - Three diagnostic scripts confirm root causes: `sleeve_symmetry_audit.py`, `detect_stitch_crossings.py`, `normal_audit.py`
-  - Root cause B (3D stitch crossings): **ruled out** — 0 crossings on all 6 seams
-  - Root cause G (face winding): **confirmed + fixed** — left sleeve was 100% inward-facing (CCW wrap reversed winding). Fix: in `build_garment_mesh()`, after `_cylindrical_wrap_sleeve()`, sample 10 faces; if mean dot(normal, radial) < 0, flip all face winding via `faces[:, [1,2]] = faces[:, [2,1]]`. Both sleeves now 100% outward.
-  - Root cause D (stitch clustering): **confirmed + fixed** — `right_cap_front` (sleeve N=20 vs armhole N=22) caused 2 sleeve vertices to get double stitch force. Fix: ratio-threshold rule — use `min()` when `longer/shorter ≤ 1.15` (all 10 tshirt seams), `max()` otherwise (tank_top seams with 1.75–3.0× ratios). All tshirt seams now have 0 repeated vertices.
-  - Stitch matching: previous comment "min→max" is now superseded. Current logic is ratio-threshold (see above).
-  - Frontend crash fixed: removed `<Environment preset="studio" />` from `GarmentViewer.tsx` — it fetched an HDR from an external CDN, crashing the Canvas when the fetch failed. Three directional lights + ambient are sufficient (metalness=0.0 makes IBL invisible).
-  - **Tests: 191 pass / 4 fail — identical to pre-session baseline.** The 4 failures are pre-existing: 3 in `TestTwoPanelMerge` (vertex count assertions that don't account for `target_edge=0.020` default) and 1 in `TestGarmentDrapeSimulation::test_stitches_closed_after_settling` (tank_top body Z collision blocking — 14.58cm pre-existing).
-- **Current visual state:** Right sleeve cap has a visible gap at the armhole junction (screenshots show pre-fix GLB). Left sleeve bending was inverted (concave push) — now corrected in code. Simulation must be re-run to produce a fixed GLB.
+  - `sew_frames`: 240, `total_frames`: 390, `collision_thickness`: 0.012
+  - `sew_stitch_compliance`: 1e-10, `bend_compliance` (cotton): 2.0e-1
+  - `target_edge`: 0.020m, stitch pairs: 174
+- **Frontend viewer:** `Environment preset="studio"` CDN-fetch crash eliminated. Three directional lights + ambient provide full studio lighting.
+- **Animated GLB pipeline:** code-complete (`write_glb_animated()` + frontend `AnimationMixer` player) — not yet run-validated end-to-end.
+- **Current visual state (from viewer screenshots):**
+  - Right sleeve surface irregularity: **RESOLVED** — even surface, closed side stitches
+  - Shoulder-sleeve gap: visible at both armhole junctions — sleeve cap attaches but leaves a seam ridge at the shoulder transition; requires conformity and armhole shape improvement
+  - Body conformity: garment sits on body surface; some stiffness (paper-cutout appearance) with limited natural fold formation — `bend_compliance` tuning deferred
+  - Drape quality: acceptable for current physics parameters; natural fold improvement is next focus
 
 **Next immediate tasks:**
-  1. Re-run `python -m simulation --scene garment_drape` with all fixes → copy to `frontend/public/models/` → verify both sleeves attach cleanly and surface is smooth.
-  2. Run `python -m simulation --scene garment_drape --animate` → test animated GLB in browser player.
-  3. Assess drape quality (paper-cutout appearance, no natural folds) — may need `bend_compliance` tuning after winding fix.
+  1. Diagnose and reduce shoulder-sleeve gap: investigate whether the armhole curve in the pattern, the cap split vertex position, or the sew-phase body collision is causing the ridge.
+  2. Improve draping realism — assess whether reducing `bend_compliance` from 2e-1 toward 5e-2 creates natural folds without causing instability.
+  3. Run `python -m simulation --scene garment_drape --animate` → test animated GLB in browser player end-to-end.
   4. Add FastAPI backend to serve simulations via HTTP (Sprint 3 Layer 2).
 
 **Performance note:** `body_drape` at 60×60 × 16 iterations + self-collision hash rebuild is intentionally slow — performance optimization is deferred. Do not optimize before Sprint 3.
