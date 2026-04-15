@@ -122,6 +122,10 @@ class TestGarmentMeshStructure:
 # Two-panel merging
 # ---------------------------------------------------------------------------
 
+_MERGE_TARGET_EDGE = 0.030  # explicit edge length so both build_garment_mesh and
+                            # triangulate_panel use the same density
+
+
 class TestTwoPanelMerge:
 
     def test_total_vertex_count(self, tmp_path):
@@ -129,35 +133,44 @@ class TestTwoPanelMerge:
         from simulation.mesh.triangulation import triangulate_panel
 
         path = _write_pattern(tmp_path, TANK_TOP_SPEC)
-        gm = build_garment_mesh(path, resolution=10)
+        gm = build_garment_mesh(path, resolution=10, target_edge=_MERGE_TARGET_EDGE)
 
-        # Triangulate each panel independently to get expected counts
+        # Triangulate each panel independently to get expected counts.
+        # Must use the same target_edge so both calls produce the same density.
         verts_2d = TANK_TOP_SPEC["panels"][0]["vertices_2d"]
-        single = triangulate_panel(verts_2d, resolution=10)
+        single = triangulate_panel(verts_2d, resolution=10, target_edge=_MERGE_TARGET_EDGE)
         expected = single.positions.shape[0] * 2  # two identical-shaped panels
 
         assert gm.positions.shape[0] == expected
 
     def test_panel_offsets(self, tmp_path):
         path = _write_pattern(tmp_path, TANK_TOP_SPEC)
-        gm = build_garment_mesh(path, resolution=10)
+        gm = build_garment_mesh(path, resolution=10, target_edge=_MERGE_TARGET_EDGE)
 
         assert len(gm.panel_offsets) == 2
         assert gm.panel_offsets[0] == 0
         # Second panel starts after first panel's vertices
         from simulation.mesh.triangulation import triangulate_panel
-        single = triangulate_panel(TANK_TOP_SPEC["panels"][0]["vertices_2d"], resolution=10)
+        single = triangulate_panel(
+            TANK_TOP_SPEC["panels"][0]["vertices_2d"],
+            resolution=10,
+            target_edge=_MERGE_TARGET_EDGE,
+        )
         assert gm.panel_offsets[1] == single.positions.shape[0]
 
     def test_faces_reference_correct_panels(self, tmp_path):
         """Faces from the second panel must only reference indices >= panel_offsets[1]."""
         from simulation.mesh.triangulation import triangulate_panel
         path = _write_pattern(tmp_path, TANK_TOP_SPEC)
-        gm = build_garment_mesh(path, resolution=10)
+        gm = build_garment_mesh(path, resolution=10, target_edge=_MERGE_TARGET_EDGE)
 
         n_front = gm.panel_offsets[1]
 
-        single = triangulate_panel(TANK_TOP_SPEC["panels"][0]["vertices_2d"], resolution=10)
+        single = triangulate_panel(
+            TANK_TOP_SPEC["panels"][0]["vertices_2d"],
+            resolution=10,
+            target_edge=_MERGE_TARGET_EDGE,
+        )
         n_faces_per_panel = single.faces.shape[0]
 
         front_faces = gm.faces[:n_faces_per_panel]

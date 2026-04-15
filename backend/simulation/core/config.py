@@ -15,7 +15,8 @@ class SimConfig:
     # --- Time ---
     dt: float = 1.0 / 60.0          # Frame timestep (seconds)
     substeps: int = 4                # Substeps per frame (reduced from 15 for 30fps)
-    solver_iterations: int = 8       # XPBD constraint iterations per substep
+    solver_iterations: int = 8       # XPBD constraint iterations per substep (drape phase)
+    sew_solver_iterations: int = 8   # XPBD iterations during sew phase; set higher to close gaps faster
     total_frames: int = 300          # Total simulation frames
 
     # --- Physics ---
@@ -25,11 +26,15 @@ class SimConfig:
     # --- Sew-then-Drape (replaces shrink_frames/initial_scale) ---
     sew_frames: int = 0              # Frames for sewing phase (reduced gravity, stiff stitches)
     sew_gravity_fraction: float = 0.05  # Gravity multiplier during sewing (5% = very gentle)
-    sew_stitch_compliance: float = 1e-9  # Very stiff stitches during sewing phase
+    sew_stitch_compliance: float = 1e-9  # Very stiff stitches during sewing phase (target)
     drape_stitch_compliance: float = 1e-7  # Normal stitch compliance during draping
+    transition_frames: int = 0       # Frames to ramp gravity+compliance at sew→drape boundary
+    sew_ramp_frames: int = 0         # Frames at start of sew to ramp compliance from soft→stiff
+    sew_initial_compliance: float = 1e-7  # Starting (soft) compliance at frame 0 of sew ramp
 
     # --- Collision (from Vestra tuning) ---
     collision_thickness: float = 0.005       # 5mm body push-out margin
+    sew_collision_thickness: float | None = None  # if set, overrides collision_thickness during sew phase
     friction_coefficient: float = 0.3        # Tangential friction (body + self)
     max_displacement: float = 0.05           # 5cm per substep — tunneling guard
     air_drag: float = 0.0                    # Exponential velocity drag coefficient per substep (0 = disabled)

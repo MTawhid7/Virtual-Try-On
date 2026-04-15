@@ -4,6 +4,105 @@ This document organizes progress history, encountered issues, structural adjustm
 
 ---
 
+### 📅 April 15, 2026: Sprint 3 Session 14 — Physics Solver Improvements & Test Suite Cleanup
+
+**Status:** 🔶 In Progress — solver improved, all tests green, visual gap unchanged  
+**Focus:** Diagnosing and fixing stitch closure failure and paper-like drape appearance.
+
+---
+
+#### Work Done This Session
+
+**Root cause analysis:**
+Full diagnostic pass across stitch constraints, XPBD solver, physics parameters, and rendering. Key findings:
+
+1. **32 solves/frame (4 substeps × 8 iterations) is geometrically insufficient** for the sleeve cap: XPBD propagates ~5–6 vertex hops per frame, but the sleeve cap crown is 15+ hops from the armhole rim. Constraint corrections cannot reach it in time.
+2. **`collision_thickness=0.012m` directly opposes stitch closure.** During sewing, body collision pushes sleeve cap particles 12mm away while stitch constraints (compliance 1e-10) try to pull them in. Net progress per frame ≈ 0.
+3. **Hard phase jump at frame 240** caused a velocity spike: stitch compliance jumped 100× (1e-10→1e-8), gravity jumped 15%→100%, and strain limiting activated simultaneously.
+4. **150 drape frames insufficient** for folds to form — garment needs 300+ frames to settle into natural gravity shapes.
+5. **The sleeve underarm gap (3.56cm) is geometric, not a convergence failure.** After doubling iterations and halving collision thickness, the gap barely changed. The cylindrical sleeve wrap creates a mismatch between the flat pattern's underarm curve and the 3D armhole rim. More solver budget cannot fix a geometry problem.
+
+**Physics improvements implemented (`core/config.py`, `core/engine.py`, `scenes/garment_drape.py`):**
+
+| Change | Before | After | Impact |
+|--------|--------|-------|--------|
+| `total_frames` | 390 (150 drape) | 570 (300 drape) | More settle time |
+| `sew_solver_iterations` | 8 | 16 (64/frame) | Better gap closure |
+| `sew_collision_thickness` | 0.012m | 0.006m | Less stitch-vs-collision fighting |
+| `transition_frames` | 0 (hard jump) | 30 | Smooth phase boundary |
+| `sew_ramp_frames` | — | 60 | Gradual stiffening from 1e-7→1e-10 |
+
+New `SimConfig` fields: `sew_solver_iterations`, `sew_collision_thickness`, `transition_frames`, `sew_ramp_frames`, `sew_initial_compliance`. All default to existing behaviour so no tests were broken.
+
+**Test suite fixes:**
+
+- `TestTwoPanelMerge` × 3: tests compared against meshes triangulated at `target_edge=0.030` but `build_garment_mesh` default changed to `0.020` in an earlier session. Fixed by adding explicit `_MERGE_TARGET_EDGE = 0.030` constant and passing it to both calls.
+- `test_stitches_closed_after_settling`: tank_top back panel placed at `Z=0.01m` (inside body — `Z_min=0.031m`). Body collision blocks seam closure, making the test measure collision interference, not stitch quality. Fixed by running `with_body=False`; body settling is separately covered by `test_garment_settles_on_body`.
+- Suppressed `locale.getdefaultlocale` Taichi deprecation warning in `pyproject.toml` filterwarnings.
+
+**Result: 195/195 tests pass (was 191/195). 0 warnings.**
+
+---
+
+#### Simulation Metrics (Session 14 vs Session 13)
+
+| Metric | Session 13 | Session 14 | Change |
+|--------|-----------|-----------|--------|
+| Max seam gap | 3.57cm | 3.56cm | −0.01cm (marginal) |
+| Mean seam gap | 0.54cm | 0.49cm | −0.05cm |
+| Max stretch | 84.6% | 83.3% | −1.3pp |
+| Mean stretch | 5.7% | 5.5% | −0.2pp |
+| Mean particle speed | 0.017 m/s | 0.012 m/s | better settled |
+| Runtime | 48.7s (125ms/frame) | 163.7s (287ms/frame) | 3.4× slower (expected: 570 frames + 64 sew iters) |
+
+**Per-seam gap (Session 14):**
+
+| Seam | Max gap | Status |
+|------|---------|--------|
+| Right side seam | 1.3cm | ✅ |
+| Left side seam | 1.0cm | ✅ |
+| Right shoulder | 1.3cm | ✅ |
+| Left shoulder | 1.7cm | ✅ |
+| Right sleeve cap (back half) | 1.4cm | ✅ |
+| Right sleeve cap (front half) | 1.5cm | ✅ |
+| Right sleeve underarm | **3.5cm** | ⚠ geometric |
+| Left sleeve cap (front half) | 1.5cm | ✅ |
+| Left sleeve cap (back half) | 1.9cm | ✅ |
+| Left sleeve underarm | **3.6cm** | ⚠ geometric |
+
+---
+
+#### Key Insights Gained
+
+**The sleeve underarm gap is a geometry problem, not a physics problem.** Doubling iterations from 32→64 per frame and halving collision thickness from 12mm→6mm produced a 0.01cm improvement (noise level). The cylindrical wrap maps the flat sleeve rectangle into a tube, but the underarm seam edges end up describing a helix, not a line — when stitched to the flat armhole edge on the front/back panels, there is an irreducible geometric mismatch. The only fixes are:
+- Reshape the sleeve pattern: taper the underarm curve to compensate for the cylindrical wrap distortion
+- Use LRA tethers to force the seam closed regardless of geometry (cosmetic fix, introduces stretch)
+
+**The paper-like appearance is `bend_compliance`, not settle time.** Running 300 drape frames vs 150 shows no visual difference in fold formation. The garment settles to `0.012 m/s` (vs `0.017`) but does not fold more — it is already at its low-energy state with the current compliance. The current `bend_compliance=2e-1` gives α̃=11,521 at 4 substeps: bending is nearly unconstrained. Counter-intuitively, this makes cloth look *stiffer* in practice because there is no bending energy to cause buckling under gravity. Reducing to `5e-2` (α̃≈2,880) is the correct next step.
+
+**Hard compliance/gravity jumps matter.** The 30-frame transition ramp and 60-frame compliance ramp improved mean seam gap and mean speed without changing max gap — they improved stability without fixing the geometric bottleneck. These changes are worth keeping.
+
+---
+
+#### Outstanding Issues
+
+1. **Sleeve underarm gap (3.5–3.6cm)** — geometric; requires pattern fix or LRA tethers
+2. **Back panel max stretch (83.3%)** at `v[1550]–v[1551]` (Y=1.487m, near back armhole) — likely edge distortion from collision pressure during sewing. Investigate with per-seam stretch diagnostic.
+3. **Paper-like appearance** — `bend_compliance` reduction not yet applied (deferred to Step 6 pending seam closure validation)
+4. **Animated GLB end-to-end** — `write_glb_animated()` code-complete but not run-validated
+
+---
+
+#### Plan for Next Session
+
+1. **Step 6: Reduce `bend_compliance`** from `2e-1` → `5e-2` in `materials/presets.py`. Run sim, check fold formation, validate stretch/gap unchanged.
+2. **Diagnose back panel stretch**: add diagnostic to identify which constraint is driving `v[1550]–v[1551]` stretch at 83.3%. If caused by sew-phase collision, `sew_collision_thickness=0.006` may still be too thick at that specific location.
+3. **LRA tethers (Step 7)**: implement `constraints/lra.py` to fix the geometric sleeve underarm gap.
+4. **Animated GLB end-to-end**: run `python -m simulation --scene garment_drape --animate`, verify browser player.
+5. **FastAPI backend** (Sprint 3 Layer 2).
+
+---
+
 ### 📅 April 14, 2026 (PM): Sprint 3 Session 13 — Simulation Re-run & Visual Validation
 
 **Status:** 🔶 In Progress — geometry fixes validated; shoulder gap and draping remain  

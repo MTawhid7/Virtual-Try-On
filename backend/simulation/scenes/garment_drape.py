@@ -77,18 +77,23 @@ def run_garment_drape(
     print(f"  Body proxy: {collider.spatial_hash.n_triangles} triangles\n")
 
     config = SimConfig(
-        total_frames=390,            # 240 sew + 150 drape
+        total_frames=570,            # 240 sew + 30 transition + 300 drape (was 390)
         substeps=4,
         solver_iterations=8,
+        sew_solver_iterations=16,    # 4×16=64 solves/frame during sew (was 4×8=32)
         damping=fabric.damping,
         max_particles=50000,
-        collision_thickness=0.012,     # was 0.008 — thicker shell prevents tunneling during sew
+        collision_thickness=0.012,
+        sew_collision_thickness=0.006,   # half-shell during sew reduces stitch-vs-collision fighting
         friction_coefficient=fabric.friction,
         air_drag=0.3,
-        sew_frames=240,              # was 150 — right sleeve cap front needs ~214 frames to close
+        sew_frames=240,
         sew_gravity_fraction=0.15,
-        sew_stitch_compliance=1e-10,  # was 1e-9 — 10x stiffer, fights collision resistance
+        sew_stitch_compliance=1e-10,
         drape_stitch_compliance=1e-8,
+        transition_frames=30,        # smooth gravity+compliance ramp at sew→drape boundary
+        sew_ramp_frames=60,          # compliance ramps 1e-7→1e-10 over first 60 sew frames
+        sew_initial_compliance=1e-7, # start soft so panels can pre-position before fighting collision
         enable_self_collision=False,  # Disabled for 30fps
     )
 
@@ -168,10 +173,13 @@ def run_garment_drape(
     engine = SimulationEngine(config, solver=solver)
     engine.collider = collider
 
+    drape_frames = config.total_frames - config.sew_frames - config.transition_frames
     print(f"  Simulation: {config.total_frames} frames "
-          f"({config.sew_frames} sew + {config.total_frames - config.sew_frames} drape)")
-    print(f"  Substeps: {config.substeps}, Iterations: {config.solver_iterations}")
-    print(f"  Solver steps/frame: {config.substeps * config.solver_iterations}")
+          f"({config.sew_frames} sew + {config.transition_frames} transition + {drape_frames} drape)")
+    print(f"  Substeps: {config.substeps}, Sew iterations: {config.sew_solver_iterations}, "
+          f"Drape iterations: {config.solver_iterations}")
+    print(f"  Sew solver steps/frame: {config.substeps * config.sew_solver_iterations}  "
+          f"Drape solver steps/frame: {config.substeps * config.solver_iterations}")
     print()
 
     # --- Run ---

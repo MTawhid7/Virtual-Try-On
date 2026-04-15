@@ -13,7 +13,8 @@ Implements a 2-stage simulation loop:
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+import math
+from dataclasses import dataclass, replace as dc_replace
 from pathlib import Path
 
 import numpy as np
@@ -118,22 +119,58 @@ class SimulationEngine:
         """
         config = self.config
 
-        # Determine simulation phase
-        in_sew_phase = (0 <= frame < config.sew_frames)
-        gravity_scale = config.sew_gravity_fraction if in_sew_phase else 1.0
-        enable_strain_limit = not in_sew_phase
+        # --- Phase determination (sew / transition / drape) ---
+        sew_end   = config.sew_frames
+        trans_end = sew_end + config.transition_frames
+
+        in_sew_phase = (0 <= frame < sew_end)
+        in_trans     = (config.transition_frames > 0) and (sew_end <= frame < trans_end)
+
+        if in_sew_phase:
+            gravity_scale     = config.sew_gravity_fraction
+            stitch_compliance = config.sew_stitch_compliance
+            enable_strain_limit = False
+
+            # Optional compliance ramp: start soft, tighten over sew_ramp_frames
+            if config.sew_ramp_frames > 0 and 0 <= frame < config.sew_ramp_frames:
+                t = frame / config.sew_ramp_frames
+                log_i = math.log10(config.sew_initial_compliance)
+                log_t = math.log10(config.sew_stitch_compliance)
+                stitch_compliance = 10.0 ** (log_i + t * (log_t - log_i))
+
+        elif in_trans:
+            # Smooth ramp: gravity 15%→100%, compliance 1e-10→1e-8 (log-space)
+            t = (frame - sew_end) / config.transition_frames
+            gravity_scale = config.sew_gravity_fraction + t * (1.0 - config.sew_gravity_fraction)
+            log_s = math.log10(config.sew_stitch_compliance)
+            log_d = math.log10(config.drape_stitch_compliance)
+            stitch_compliance = 10.0 ** (log_s + t * (log_d - log_s))
+            enable_strain_limit = False  # keep off during transition
+
+        else:
+            gravity_scale     = 1.0
+            stitch_compliance = config.drape_stitch_compliance
+            enable_strain_limit = True
+
         enable_self_collision = (
             config.enable_self_collision
             and not in_sew_phase
+            and not in_trans
             and self.self_collider is not None
         )
 
-        # Update stitch compliance based on phase
+        # Number of solver iterations — higher during sew for better gap closure
+        n_iters = config.sew_solver_iterations if in_sew_phase else config.solver_iterations
+
+        # Update stitch compliance on solver
         if self.solver is not None and hasattr(self.solver, '_stitch_compliance'):
-            if in_sew_phase:
-                self.solver._stitch_compliance = config.sew_stitch_compliance
-            else:
-                self.solver._stitch_compliance = config.drape_stitch_compliance
+            self.solver._stitch_compliance = stitch_compliance
+
+        # Effective config for collision — optionally thinner shell during sew phase
+        if in_sew_phase and config.sew_collision_thickness is not None:
+            effective_config = dc_replace(config, collision_thickness=config.sew_collision_thickness)
+        else:
+            effective_config = config
 
         # Integrator is stateless, so instantiating here is extremely lightweight
         integrator = Integrator(
@@ -159,7 +196,7 @@ class SimulationEngine:
 
             # 4. Solve constraints (XPBD iterations, body collision interleaved)
             if self.solver is not None:
-                for _iteration in range(config.solver_iterations):
+                for _iteration in range(n_iters):
                     self.solver.step(
                         state,
                         config.substep_dt,
@@ -169,7 +206,7 @@ class SimulationEngine:
 
                     # Body collision interleaved — static geometry, safe to repeat
                     if self.collider is not None:
-                        self.collider.resolve(state, config)
+                        self.collider.resolve(state, effective_config)
 
             # 5. Update velocities from position delta + damping
             integrator.update(state)
