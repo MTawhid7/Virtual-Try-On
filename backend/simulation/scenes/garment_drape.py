@@ -28,11 +28,27 @@ from simulation.export.gltf_writer import write_glb_animated, write_glb_with_bod
 from simulation.materials import FABRIC_PRESETS
 from simulation.mesh.grid import compute_area_weighted_inv_masses
 from simulation.mesh.panel_builder import build_garment_mesh
+from simulation.mesh.gc_mesh_adapter import build_garment_mesh_gc
 from simulation.solver.xpbd import XPBDSolver
 
 
 _BODY_GLB_PATH = "data/bodies/mannequin_physics.glb"
 _TSHIRT_JSON = "data/patterns/tshirt.json"
+_GC_SHIRT_JSON = "data/patterns/garmentcode/shirt_mean.json"
+
+# Z-offset to align GarmentCode SMPL panel positions onto mannequin_physics.glb.
+#
+# GarmentCode's mean body has torso panels centred at Z≈+0.025m (after cm→m):
+#   front torso translation Z = +25cm → +0.25m
+#   back  torso translation Z = -20cm → -0.20m
+#   centre = (0.25 + (-0.20)) / 2 = +0.025m
+#
+# Our mannequin_physics.glb body centre at chest height:
+#   chest_z_front = 0.2786m, chest_z_back = 0.0335m
+#   centre = (0.2786 + 0.0335) / 2 = +0.1561m
+#
+# Required offset: 0.1561 - 0.025 = 0.131m
+_GC_BODY_Z_OFFSET: float = 0.131
 
 
 def run_garment_drape(
@@ -42,6 +58,8 @@ def run_garment_drape(
     resolution: int = 20,
     export_body: bool = True,
     animate: bool = False,
+    gc_pattern: str | None = None,
+    gc_body_z_offset: float = _GC_BODY_Z_OFFSET,
 ) -> None:
     """
     Drape a garment pattern onto the body using sew-then-drape.
@@ -62,7 +80,10 @@ def run_garment_drape(
         6. Edge length preservation (mean stretch < 15%)
     """
     print("=== Garment Drape Scene (Sew-then-Drape) ===")
-    print(f"  Pattern: {pattern_path}")
+    if gc_pattern:
+        print(f"  Pattern: {gc_pattern} (GarmentCode pipeline)")
+    else:
+        print(f"  Pattern: {pattern_path} (native pipeline)")
     print("  Draping onto mannequin body mesh...\n")
 
     fabric = FABRIC_PRESETS["cotton"]
@@ -97,17 +118,45 @@ def run_garment_drape(
         enable_self_collision=False,  # Disabled for 30fps
     )
 
-    # --- Garment mesh (no scaling — panels placed close to body) ---
-    print("  Building garment mesh from pattern JSON...")
-    garment = build_garment_mesh(
-        pattern_path,
-        resolution=resolution,
-        global_scale=1.0,  # No scaling — sew-then-drape replaces shrink
-        target_edge=0.020,  # 2cm — denser stitches than old 3cm default
-    )
+    # --- Garment mesh ---
+    if gc_pattern:
+        # GarmentCode pipeline: pattern spec → BoxMesh → GarmentMesh
+        print(f"  Building garment mesh from GarmentCode spec: {gc_pattern}")
+        print(f"  GC body Z offset: {gc_body_z_offset:+.4f}m")
+        garment = build_garment_mesh_gc(
+            gc_pattern,
+            mesh_resolution=1.5,   # 1.5cm: finer than default 2cm → more stitch pairs
+            fabric="cotton",
+            body_z_offset=gc_body_z_offset,
+        )
+    else:
+        # Original pipeline: garment-sim's native pattern JSON
+        print("  Building garment mesh from pattern JSON...")
+        garment = build_garment_mesh(
+            pattern_path,
+            resolution=resolution,
+            global_scale=1.0,
+            target_edge=0.020,
+        )
     n_particles = garment.positions.shape[0]
     config.max_particles = max(n_particles + 200, 1000)
     n_stitches = garment.stitch_pairs.shape[0]
+
+    # Diagnostic: print per-panel 3D bounding boxes so alignment can be
+    # quickly verified against mannequin surface bounds.
+    if gc_pattern:
+        offsets_diag = garment.panel_offsets + [n_particles]
+        print("  Panel 3D positions (after Z offset):")
+        for k, pid in enumerate(garment.panel_ids):
+            ps = garment.positions[offsets_diag[k]:offsets_diag[k + 1]]
+            print(
+                f"    {pid:<24} "
+                f"Y=[{ps[:, 1].min():.3f}, {ps[:, 1].max():.3f}]m  "
+                f"Z=[{ps[:, 2].min():.3f}, {ps[:, 2].max():.3f}]m"
+            )
+        # Body reference bounds at chest height for quick sanity check
+        print("  Body ref @ chest: Z_back=0.034m, Z_front=0.279m")
+
     print(f"  Panels:          {garment.panel_ids}")
     print(f"  Particles:       {n_particles}")
     print(f"  Triangles:       {garment.faces.shape[0]}")
@@ -365,6 +414,10 @@ if __name__ == "__main__":
     parser.add_argument("--res", type=int, default=20, help="Triangulation resolution")
     parser.add_argument("--no-body", action="store_true", help="Export cloth-only GLB (no body mesh)")
     parser.add_argument("--animate", action="store_true", help="Export animated GLB (morph-target drape sequence)")
+    parser.add_argument("--gc", type=str, default=None, metavar="GC_SPEC",
+                        help="Path to GarmentCode pattern spec JSON (uses GC pipeline instead of native)")
+    parser.add_argument("--gc-z-offset", type=float, default=_GC_BODY_Z_OFFSET, metavar="METRES",
+                        help=f"Z offset (m) to align GC panels onto mannequin (default {_GC_BODY_Z_OFFSET})")
 
     args = parser.parse_args()
 
@@ -375,4 +428,6 @@ if __name__ == "__main__":
         resolution=args.res,
         export_body=not args.no_body,
         animate=args.animate,
+        gc_pattern=args.gc,
+        gc_body_z_offset=args.gc_z_offset,
     )

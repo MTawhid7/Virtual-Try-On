@@ -67,6 +67,17 @@ python -m simulation --scene body_drape
 python -m simulation --scene garment_drape
 # → storage/garment_drape.glb
 
+# GarmentCode parametric pattern (shirt, hoody, dress)
+python -m simulation --scene garment_drape --gc data/patterns/garmentcode/shirt_mean.json
+# → storage/garment_drape.glb
+
+# GarmentCode with animated morph-target timeline
+python -m simulation --scene garment_drape --gc data/patterns/garmentcode/shirt_mean.json --animate
+# → storage/garment_drape.glb
+
+# Override body Z-offset (default 0.131m aligns SMPL panels → mannequin_physics.glb)
+python -m simulation --scene garment_drape --gc data/patterns/garmentcode/shirt_mean.json --gc-z-offset 0.131
+
 # Animated GLB export (morph-target drape sequence for frontend player)
 python -m simulation --scene garment_drape --animate
 # → storage/garment_drape_animated.glb (+ static garment_drape.glb alongside)
@@ -74,6 +85,9 @@ python -m simulation --scene garment_drape --animate
 # Export GLBs to frontend viewer
 python -m scripts.export_for_viewer
 # → frontend/public/models/*.glb  (then open http://localhost:3000/viewer)
+
+# Verify GarmentCode panel alignment vs body surface (fast, no simulation)
+python -m scripts.verify_gc_alignment
 
 # Export to custom path
 python -m simulation --scene sphere_drape -o my_output.glb
@@ -114,8 +128,12 @@ python -m pytest tests/integration/ -v
 | **Sprint 3, Animated GLB** | 🔶 | Raw glTF 2.0 morph-target animated export (`write_glb_animated()`). Frontend `AnimationMixer` player with play/pause, timeline scrubber, SEW/DRAPE phase badge, speed selector. Geometry fixes applied (face winding, stitch clustering); re-simulation pending. |
 | **Sprint 3, Geometry Debug** | ✅ | Root-cause analysis scripts + fixes validated. Right sleeve surface irregularity resolved. Face winding correction + stitch clustering fix in `panel_builder.py`. |
 | **Sprint 3, Physics Solver** | 🔶 | Solver improvements: 2-stage sew/transition/drape with smooth compliance + gravity ramps, doubled sew iterations (64/frame), halved sew collision thickness. All 10 seams pass. Max seam gap 3.56cm (sleeve underarm — geometric constraint). 195/195 tests pass. Remaining: bend_compliance tuning, LRA tethers for underarm gap, back panel stretch. |
-| **Sprint 3, Backend API** | ⬜ | FastAPI layer to serve simulations via HTTP (pattern selector + fabric picker → run simulation). |
-| **Sprint 4** | ⬜ | Integration, polish, end-to-end testing |
+| **Sprint 3, GarmentCode (Phases 1–3)** | ✅ | Vendored `pygarment`, replaced CGAL with `triangle` CDT, built `gc_mesh_adapter.py` (BoxMesh → GarmentMesh, non-manifold topology preserved), wired `--gc` flag. 195 tests passing. |
+| **Phase 4, GC Pipeline Validation** | 🔶 | Body Z-offset fix (+0.131m SMPL→mannequin alignment), fixed `--gc` arg in `__main__.py`, iterative seam densification, 12 new integration tests (207 total). shirt_mean.json: 5/6 checks pass. Sleeve cap gaps ~10cm and max stretch ~318% outlier remain — require Phase 7 attachment constraints. |
+| **Phase 5, Backend API** | ⬜ | FastAPI layer to serve simulations via HTTP (pattern selector + fabric picker → run simulation). |
+| **Phase 6, Pattern Library** | ⬜ | Generate bodice, pants, skirts from GarmentCode programs; pattern selector in frontend. |
+| **Phase 7, Simulation Quality** | ⬜ | Attachment constraints (soft pins during sew phase), self-collision for layered garments. |
+| **Phase 8, 2D Pattern Editor** | ⬜ | Interactive SVG canvas for panel creation/editing + stitch definition; live re-simulation. |
 
 ## Technology Stack
 
@@ -124,7 +142,7 @@ python -m pytest tests/integration/ -v
 | Simulation kernels | [Taichi Lang](https://taichi-lang.org/) |
 | Numerics | NumPy |
 | Mesh I/O | trimesh |
-| Triangulation | mapbox-earcut |
+| Triangulation | `triangle` lib (Constrained Delaunay, cross-platform) |
 | Mesh decimation | fast-simplification |
 | API (Sprint 3) | FastAPI |
 | Frontend (Sprint 3) | Next.js + React Three Fiber |

@@ -29,6 +29,20 @@ python -m simulation --scene garment_drape        # pattern-based garment on bod
 python -m simulation --scene sphere_drape -v          # live Taichi GGUI visualizer
 python -m simulation --scene sphere_drape -o out.glb  # custom export path
 # Default export: storage/{scene}.glb
+
+# GarmentCode parametric patterns (Phase 4+)
+python -m simulation --scene garment_drape --gc data/patterns/garmentcode/shirt_mean.json
+python -m simulation --scene garment_drape --gc data/patterns/garmentcode/shirt_mean.json --animate
+python -m simulation --scene garment_drape --gc data/patterns/garmentcode/hoody_mean.json
+python -m simulation --scene garment_drape --gc data/patterns/garmentcode/dress_pencil.json
+# --gc-z-offset METRES  override body Z offset (default: 0.131 for mannequin_physics.glb)
+```
+
+**GarmentCode diagnostics:**
+```bash
+python -m scripts.verify_gc_alignment                              # shirt_mean.json, default offset
+python -m scripts.verify_gc_alignment --pattern data/patterns/garmentcode/hoody_mean.json
+python -m scripts.verify_gc_alignment --z-offset 0.0              # check without offset
 ```
 
 **Phase verification scripts (run from backend/):**
@@ -153,40 +167,47 @@ Garment panels must start **outside** these bounds AND be **wide enough** for se
 
 ## Current State
 
-**Sprint 3 Session 14: Physics solver improvements, all tests green (195/195).**
+**April 16, 2026: GarmentCode Phase 4 — Pipeline Validation**
 
-- **Tests: 195 pass / 0 fail.** All 4 pre-existing failures resolved:
-  - 3 `TestTwoPanelMerge` failures: tests were comparing against `target_edge=0.030` meshes but function default changed to `0.020` — fixed by adding explicit `target_edge=_MERGE_TARGET_EDGE` to both calls.
-  - 1 `test_stitches_closed_after_settling` failure: tank_top back panel at `Z=0.01m` is inside body (`Z_min=0.031m`), collision blocked seam closure — fixed by running this test without body collision (`with_body=False`) since stitch correctness is independent.
-- **Simulation metrics (current GLB — all 10 seams pass):**
-  - Max seam gap: **3.56cm** (sleeve underarm — inherent cylindrical wrap geometry; marginal vs 3.57cm)
-  - Mean seam gap: 0.49cm (was 0.54cm)
-  - Max stretch: **83.3%** (was 84.6%; worst edge in back panel near armhole, v[1550]–v[1551] at Y=1.487m)
-  - Mean stretch: 5.5%  |  Mean speed: 0.012 m/s (better settled)  |  Runtime: 163.7s (287ms/frame)
-  - 104/174 stitch pairs welded post-sim (<5mm gap)
-- **Physics parameters (current):**
-  - `sew_frames`: 240, `transition_frames`: 30, `total_frames`: 570 (300 drape), `collision_thickness`: 0.012
-  - `sew_collision_thickness`: 0.006 (6mm during sew phase — halved to reduce stitch-vs-collision fighting)
-  - `sew_solver_iterations`: 16 (64 solves/frame during sew, was 32), `solver_iterations`: 8
-  - `sew_ramp_frames`: 60, `sew_initial_compliance`: 1e-7 → `sew_stitch_compliance`: 1e-10
-  - `drape_stitch_compliance`: 1e-8, `bend_compliance` (cotton): 2.0e-1, `target_edge`: 0.020m
-- **Key insight from Session 14:** The marginal improvement in max gap (3.57→3.56cm) reveals that the sleeve underarm gap is **geometric, not a solver convergence problem**. Doubling sew iterations and halving collision thickness had little effect on the underarm seam specifically — the cylindrical wrap geometry creates a mismatch that cannot be resolved by more iterations alone. LRA tethers or pattern geometry revision are needed.
-- **Frontend viewer:** `Environment preset="studio"` CDN-fetch crash eliminated. Three directional lights + ambient. Double-sided cloth rendering.
-- **Animated GLB pipeline:** code-complete (`write_glb_animated()` + frontend `AnimationMixer` player) — not yet run-validated end-to-end.
-- **Current visual state (from viewer screenshots):**
-  - Side seams: 1.0–1.3cm max gap — visually flush
-  - Shoulder seams: 1.3–1.7cm — acceptable
-  - Sleeve caps: 1.4–1.9cm — attached at armhole
-  - Sleeve underarm (worst): 3.5–3.6cm — visible gap, geometric constraint
-  - Body conformity: garment sits on body surface; paper-cutout appearance persists — `bend_compliance` tuning (Step 6) still pending
-  - Drape quality: 300 drape frames is not visually better than 150 — the bottleneck is `bend_compliance`, not settle time
+Phase 4 implemented and validated. Full `shirt_mean.json` simulation runs end-to-end.
+
+**Completed this session:**
+- **`__main__.py` CLI fix:** `--gc` and `--gc-z-offset` args were missing from the central CLI router (`__main__.py`). Only `garment_drape.py`'s own `__main__` block had them. Fixed by adding both args and threading them through the `run_garment_drape()` kwargs block.
+- **Body Z-offset (+0.131m):** GarmentCode SMPL body Z-center = +0.025m (after cm→m); `mannequin_physics.glb` center = +0.156m. Added `body_z_offset: float = 0.0` param to `boxmesh_to_garment_mesh()` and `build_garment_mesh_gc()`. Applied per-panel inside the loop before stitch densification. Default 0.0 keeps all existing unit tests unaffected. `_GC_BODY_Z_OFFSET = 0.131` constant in `garment_drape.py` (with derivation comment).
+- **Iterative seam densification:** Raised `_MIN_PAIRS_PER_SEAM` from 6 → 12. Replaced single-pass densification with 4-pass iterative approach using `set()`-based deduplication to avoid duplicate nearest-vertex hits on coarse meshes.
+- **mesh_resolution** lowered from 2.0 cm → 1.5 cm in GC path for more natural stitch pairs.
+- **12 new integration tests** in `tests/integration/test_gc_pipeline.py` (6 mesh-setup + 6 simulation). All pass. Total: **207 tests, 0 failures.**
+- **`scripts/verify_gc_alignment.py`**: diagnostic script printing per-panel Z extents vs body surface bounds, initial stitch gaps, overall pass/fail.
+- **`docs/implementation_plan_phases4_to_8.md`**: comprehensive phase plan with simulation results table, body alignment derivation, key constants.
+
+**Simulation validation results (shirt_mean.json, 1.5cm mesh):**
+| Check | Result |
+|-------|--------|
+| NaN | ✅ PASS |
+| Floor penetration | ✅ PASS (min Y = 0.898m) |
+| Torso coverage | ✅ PASS (2870/2870 particles in Y=[0.5,1.8]m) |
+| Mean speed | ✅ PASS (0.011 m/s — fully settled) |
+| Mean stretch | ✅ PASS (5.55%) |
+| Stitch gaps | ❌ FAIL (3 sleeve cap seams at 10–11cm) |
+
+**Known issues (require Phase 7):**
+1. **Sleeve cap seam gaps (~10–11cm):** `seam_5` n=3, `seam_13` n=3, `seam_14` n=8. Short sleeve edges at 1.5cm resolution genuinely produce only 3 unique vertex pairs — mesh density ceiling, not a code bug. Densification can't overcome it. Need Phase 7 attachment constraints to anchor shoulder/collar vertices and shorten the initial gap.
+2. **Max stretch outlier (~318%):** Back torso panel starts at Z=−0.069m, pulled forward by stitches; some vertices slip through the thin sew_collision_thickness=0.006m shell. End positions Z=0.056–0.083m (inside body). Same fix: Phase 7 attachment pins.
+3. **Frontend viewer shows old DXF tshirt:** `/api/models` endpoint serves `frontend/public/models/` pre-computed GLBs. GC output is at `backend/storage/gc_shirt.glb` (not auto-copied). Will resolve when Phase 5 FastAPI layer serves `backend/storage/` as static files.
+
+**GarmentCode body alignment:**
+```
+mannequin_physics.glb: chest_z_front=0.2786m, chest_z_back=0.0335m
+  → mannequin_center_z = (0.2786 + 0.0335) / 2 = 0.1561m
+GarmentCode SMPL: front_torso_z=+0.25m, back_torso_z=−0.20m (after cm→m)
+  → gc_center_z = (0.25 + (−0.20)) / 2 = +0.025m
+Required offset: 0.1561 − 0.025 = 0.131m  (+Z direction, no flip needed)
+```
 
 **Next immediate tasks:**
-  1. **Reduce `bend_compliance`** from `2e-1` toward `5e-2` in `materials/presets.py` for natural fold formation (Step 6 of plan).
-  2. **Fix sleeve underarm gap** — revise sleeve pattern geometry (tighter underarm curve) OR implement LRA tethers (Step 7).
-  3. **Investigate back panel max stretch** at `v[1550]–v[1551]` (83.3%, Y=1.487m near armhole). May be armhole edge distortion from collision during sewing.
-  4. **Animated GLB end-to-end** — run `python -m simulation --scene garment_drape --animate` and verify browser playback.
-  5. **FastAPI backend** — Sprint 3 Layer 2: HTTP endpoint for pattern + fabric → simulation result.
+  1. **Phase 7 — Attachment constraints:** Soft positional pin constraints (compliance 1e-4) anchoring waist/collar vertices during sew phase. Fixes both sleeve gap and back panel slip-through. New file: `simulation/constraints/attachment.py` (no `from __future__ import annotations`).
+  2. **Phase 5 — FastAPI layer:** `POST /api/simulate` endpoint; serve `backend/storage/` as static files so frontend auto-loads the GC GLB.
+  3. **Live visualization path:** `--visualize` flag via Taichi GGUI for real-time drape feedback.
 
 **Performance note:** `body_drape` at 60×60 × 16 iterations + self-collision hash rebuild is intentionally slow — performance optimization is deferred. Do not optimize before Sprint 3.
 

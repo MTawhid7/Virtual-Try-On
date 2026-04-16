@@ -42,6 +42,14 @@ def main() -> None:
         "--animate", action="store_true",
         help="Export animated GLB (morph-target drape sequence) for garment_drape scene.",
     )
+    parser.add_argument(
+        "--gc", type=str, default=None, metavar="GC_SPEC",
+        help="Path to GarmentCode pattern spec JSON (uses GC pipeline for garment_drape scene).",
+    )
+    parser.add_argument(
+        "--gc-z-offset", type=float, default=None, metavar="METRES",
+        help="Z offset (m) to align GC panels onto mannequin (default: 0.131).",
+    )
 
     args = parser.parse_args()
 
@@ -62,6 +70,10 @@ def main() -> None:
                       resolution=args.resolution, animate=args.animate)
         if args.pattern:
             kwargs["pattern_path"] = args.pattern
+        if args.gc:
+            kwargs["gc_pattern"] = args.gc
+        if args.gc_z_offset is not None:
+            kwargs["gc_body_z_offset"] = args.gc_z_offset
         run_garment_drape(**kwargs)
     else:
         print(f"Unknown scene: {args.scene}", file=sys.stderr)

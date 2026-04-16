@@ -6,7 +6,7 @@ This document organizes progress history, encountered issues, structural adjustm
 
 ### 📅 April 15, 2026: Sprint 3 Session 14 — Physics Solver Improvements & Test Suite Cleanup
 
-**Status:** 🔶 In Progress — solver improved, all tests green, visual gap unchanged  
+**Status:** 🔶 In Progress — solver improved, all tests green, visual gap unchanged
 **Focus:** Diagnosing and fixing stitch closure failure and paper-like drape appearance.
 
 ---
@@ -105,7 +105,7 @@ New `SimConfig` fields: `sew_solver_iterations`, `sew_collision_thickness`, `tra
 
 ### 📅 April 14, 2026 (PM): Sprint 3 Session 13 — Simulation Re-run & Visual Validation
 
-**Status:** 🔶 In Progress — geometry fixes validated; shoulder gap and draping remain  
+**Status:** 🔶 In Progress — geometry fixes validated; shoulder gap and draping remain
 **Focus:** Re-running simulation with all Session 13 fixes applied; visual verification.
 
 ---
