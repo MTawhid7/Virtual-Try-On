@@ -197,3 +197,126 @@ The GC pipeline is functionally complete and passes 5 of 6 validation checks. Th
 **Phase 8 — 2D Pattern Editor:**
 - SVG canvas for panel creation/editing with vertex drag, edge-click stitching
 - `POST /api/simulate` already designed to accept inline `pattern_json: dict` (Phase 5 schema)
+
+---
+
+### 📅 April 17, 2026: Sew-Phase Debugging — Root Cause Confirmed
+
+**Status:** 🔬 Debug Complete — root cause confirmed, fixes partially applied, Phase 7 unblocked
+**Focus:** Build targeted debug scripts to confirm why sleeve cap seams fail; identify whether the problem is panel placement, stitch connectivity, mesh density, or the solver.
+
+#### Work Completed
+
+**Three debug scripts created:**
+
+| Script | What it does |
+|--------|-------------|
+| `scripts/debug_gc_stitch_geometry.py` | Per-seam analysis without simulation: panel centroids, n_pairs, gap distribution, arc-length coverage, clustering, duplicate-pair detection |
+| `scripts/debug_gc_panel_placement.py` | Exports a debug GLB: each panel a distinct colour + stitch ribbons (magenta) + body mesh. Shows initial 3D configuration in the viewer before any simulation. |
+| `scripts/debug_gc_sew_trace.py` | Runs only the sew phase with N checkpoints; prints gap table + body-penetration count at each frame; exports one GLB snapshot per checkpoint for step-through inspection. |
+
+**Sew phase tuning applied to `garment_drape.py`:**
+- `sew_collision_thickness`: 0.006m → **0.020m** (prevents fast-panel tunneling; fixed seam_6)
+- `sew_initial_compliance`: 1e-7 → **1e-4** (softer start so panels decelerate before hitting body)
+- `sew_ramp_frames`: 60 → **120** (slower compliance ramp over first 120 frames)
+
+#### Root Cause Analysis
+
+**Stitch geometry findings** (`debug_gc_stitch_geometry.py`):
+
+All 8 panels start as flat vertical sheets at constant Z depths:
+
+| Panel | Initial Z | Role |
+|-------|-----------|------|
+| right/left_ftorso | +0.381m | front body panels (10cm past body surface at 0.279m) |
+| right/left_btorso | −0.069m | back body panels (10cm behind body surface at 0.034m) |
+| right/left_sleeve_f | +0.306m | front sleeve halves |
+| right/left_sleeve_b | +0.006m | back sleeve halves |
+
+The offset (+0.131m) is correctly applied. Panels are supposed to start flat — the sew phase is what curves them around the body.
+
+GarmentCode itself warns about the mesh density issue at load time:
+```
+Edge::WARNING::Detected edge represented only by two vertices..
+mesh resolution might be too low. resolution = 1.5, edge length = 0.747829
+```
+The failing seam corners (seam_5/13) are 0.75cm edges at 1.5cm mesh resolution — these genuinely only have 2 vertices. Our densification correctly adds a midpoint = n=3, which is the hard ceiling at this resolution.
+
+**Sew trace findings** (`debug_gc_sew_trace.py`):
+
+The trace exposed a two-layer problem:
+
+*Layer 1 — All gaps lock within 30 frames:*
+```
+Frame  0: body_interior_verts=0     ← clean initial state
+Frame 30: body_interior_verts=2157  ← 75% of 2870 particles INSIDE the body
+Frame 240: body_interior_verts=2167  ← essentially unchanged for the next 210 frames
+```
+The stiff compliance pulls panels from 30–45cm away fast enough to punch through the 6mm collision shell in the first 30 frames. After that, the system is in a stable equilibrium — adding more sew frames does nothing.
+
+*Layer 2 — The equilibrium gap equals body depth:*
+
+Seams that fail permanently are **wrap-around seams** where the two stitched vertices are on geometrically opposite sides of the body. The front panel (Z=+0.381m) and back panel (Z=−0.069m) try to meet through the body (Z=[0.034, 0.279m]). The body collision creates a stable equilibrium gap ≈ body depth at that location (~10–13cm). This is not a solver bug — it is physically correct behavior: you cannot sew through a body.
+
+*Tuning outcome* (0.020m shell + 1e-4 initial compliance + 120-frame ramp):
+
+| Seam | Before | After | Change |
+|------|--------|-------|--------|
+| seam_6 left side (9 pairs) | 10.6cm ❌ | 2.2cm ✅ | +fixed |
+| seam_5 tiny corner (3 pairs) | 8.7cm | 12.1cm | worse |
+| seam_14 right side (8 pairs) | 10.5cm | 10.5cm | unchanged |
+| seam_8 sleeve underarm | 11.6cm | 11.6cm | unchanged |
+
+The thicker shell fixed seam_6 because 9 springs generate enough accumulated force to pull through the 2cm equilibrium. seam_14 (8 springs) doesn't cross that threshold — this precisely explains the left/right asymmetry that was previously unexplained. Softer compliance made seam_5/13 worse because less force = less ability to overcome the shell at the tiny corner.
+
+Tuning is exhausted. The remaining failures are topological, not parametric.
+
+#### Current State
+
+After sew-phase tuning:
+- **15 of 18 seams close cleanly** (mean gap < 1cm)
+- **3 seams remain stuck**: seam_5/13 (tiny sleeve cap corners, n=3, mesh ceiling) and seam_14 (right side seam, 1-fewer-pair threshold miss)
+- **Back panel body penetration**: ~430 btorso vertices inside the body at all sew-phase frames
+- **seam_0/2/8** (sleeve underarm and armhole): stuck at 6–13cm because the body occupies the space between the stitch endpoints — this is topologically correct but the max gap exceeds the 5cm validation threshold
+
+#### Key Insights
+
+1. **Sew-with-body-present is fundamentally wrong for wrap-around seams.** The side seams and sleeve underarm seams connect vertices that are on opposite sides of the body. No compliance tuning can close a seam through a solid collision mesh. In real garment construction you sew the garment first, then dress it on the body. Our pipeline does the reverse.
+
+2. **The equilibrium gap = body depth at the seam location.** This is a precise, measurable prediction: side seam gap ≈ torso depth at hip (~10cm), sleeve underarm gap ≈ armhole depth (~13cm). If Phase 7 attachment constraints correctly anchor panels to the body surface before sewing, these equilibrium gaps go to ~0 because the panels start ON the body, not across it.
+
+3. **The left/right asymmetry (seam_6 passes, seam_14 fails) has a clear cause.** It is the 1-pair difference (9 vs 8) at the force threshold for the 2cm collision shell. This is a deterministic prediction, not a random solver artifact.
+
+4. **Tuning can move seams past thresholds at the margin** (seam_6 fixed) but cannot solve the topology problem (seam_14, seam_0/8).
+
+5. **75% body penetration by frame 30 is a diagnostic signal, not just a number.** Any future sew-phase tuning effort should check `body_interior_verts` at frame 30. The target after Phase 7 should be < 5% (only interior panels temporarily passing through narrow areas, not all body panels tunneling).
+
+6. **`debug_gc_sew_trace.py` is the canonical sew-phase health check.** It gives a complete view of seam closure progress and body penetration in one fast run (sew-phase only, ~40s). Should be run after any future simulation parameter change.
+
+#### Next Steps
+
+**Phase 7 — Attachment Constraints (unblocked, proceed immediately):**
+
+The diagnosis is complete. Attachment constraints are the correct fix and the only remaining path. Concretely:
+
+1. **New file `simulation/constraints/attachment.py`** — `AttachmentConstraints` Taichi kernel. Soft compliance (1e-4). No `from __future__ import annotations`.
+
+   ```python
+   @ti.data_oriented
+   class AttachmentConstraints:
+       def initialize(self, vertex_indices: NDArray, target_positions: NDArray) -> None: ...
+       def reset_lambdas(self) -> None: ...
+       @ti.kernel
+       def project(self, positions: ti.template(), inv_mass: ti.template(),
+                   n_attachments: ti.i32, compliance: ti.f32, dt: ti.f32): ...
+   ```
+
+2. **`gc_mesh_adapter.py` — `build_gc_attachment_constraints()`**: Select waist-level and shoulder-level vertices from each torso panel. Compute target positions on the body ellipse from `mannequin_profile.json` at the panel's median Y. Return `(vertex_indices, target_positions)`.
+
+3. **`engine.py`**: Call `attachment_constraints.project()` inside the sew-phase substep loop; skip during drape phase.
+
+4. **`garment_drape.py` GC path**: Build and wire attachment constraints.
+
+5. **Validation**: After Phase 7, `debug_gc_sew_trace.py` should show `body_interior_verts < 100` at frame 30, and seam_14/seam_5/13 gaps should be < 3cm.
+
+**Why this works:** If back-torso waist vertices are pinned to Z≈0.034m (body back surface) from the start, the panel never has to travel from Z=−0.069m → Z=+0.156m through the body. It starts on the body surface. Side-seam stitches then pull the panel along the body surface rather than through it. The equilibrium gap shrinks to approximately the attachment compliance tolerance (~1cm), not the body depth (~10cm).

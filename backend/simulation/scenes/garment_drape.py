@@ -105,7 +105,9 @@ def run_garment_drape(
         damping=fabric.damping,
         max_particles=50000,
         collision_thickness=0.012,
-        sew_collision_thickness=0.006,   # half-shell during sew reduces stitch-vs-collision fighting
+        sew_collision_thickness=0.020,   # 2cm shell during sew — prevents fast-panel tunneling
+                                         # (was 0.006m; debug trace showed 75% of particles inside
+                                         # body by frame 30 with the thin shell, locking seam gaps)
         friction_coefficient=fabric.friction,
         air_drag=0.3,
         sew_frames=240,
@@ -113,8 +115,10 @@ def run_garment_drape(
         sew_stitch_compliance=1e-10,
         drape_stitch_compliance=1e-8,
         transition_frames=30,        # smooth gravity+compliance ramp at sew→drape boundary
-        sew_ramp_frames=60,          # compliance ramps 1e-7→1e-10 over first 60 sew frames
-        sew_initial_compliance=1e-7, # start soft so panels can pre-position before fighting collision
+        sew_ramp_frames=120,         # compliance ramps over 120 frames (was 60) — slower pull
+                                     # prevents panels from punching through body in first 30 frames
+        sew_initial_compliance=1e-4, # very soft start (was 1e-7) — panels move slowly at first,
+                                     # decelerating before they hit the body surface
         enable_self_collision=False,  # Disabled for 30fps
     )
 
