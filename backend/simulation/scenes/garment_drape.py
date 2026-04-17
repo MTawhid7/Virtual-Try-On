@@ -28,7 +28,8 @@ from simulation.export.gltf_writer import write_glb_animated, write_glb_with_bod
 from simulation.materials import FABRIC_PRESETS
 from simulation.mesh.grid import compute_area_weighted_inv_masses
 from simulation.mesh.panel_builder import build_garment_mesh
-from simulation.mesh.gc_mesh_adapter import build_garment_mesh_gc
+from simulation.mesh.gc_mesh_adapter import build_garment_mesh_gc, build_gc_attachment_constraints
+from simulation.constraints.attachment import AttachmentConstraints
 from simulation.solver.xpbd import XPBDSolver
 
 
@@ -105,9 +106,7 @@ def run_garment_drape(
         damping=fabric.damping,
         max_particles=50000,
         collision_thickness=0.012,
-        sew_collision_thickness=0.020,   # 2cm shell during sew — prevents fast-panel tunneling
-                                         # (was 0.006m; debug trace showed 75% of particles inside
-                                         # body by frame 30 with the thin shell, locking seam gaps)
+        sew_collision_thickness=0.006,   # 6mm shell during sew — thin enough for seam closure
         friction_coefficient=fabric.friction,
         air_drag=0.3,
         sew_frames=240,
@@ -190,6 +189,19 @@ def run_garment_drape(
     print(f"  Distance constraints: {constraints.distance.n_edges if constraints.distance else 0}")
     print(f"  Bending constraints:  {constraints.bending.n_hinges if constraints.bending else 0}")
     print(f"  Stitch constraints:   {constraints.stitch.n_stitches if constraints.stitch else 0}")
+
+    # --- Attachment constraints (GC path only — sew phase panel anchoring) ---
+    if gc_pattern:
+        attach_indices, attach_targets = build_gc_attachment_constraints(
+            garment,
+            profile_path="data/bodies/mannequin_profile.json",
+            clearance=0.020,   # 2cm clearance — keeps panels anchored outside body surface
+        )
+        if len(attach_indices) > 0:
+            attach_constraints = AttachmentConstraints(max_attachments=len(attach_indices) + 50)
+            attach_constraints.initialize(attach_indices, attach_targets)
+            constraints.attachment = attach_constraints
+            print(f"  Attachment constraints: {len(attach_indices)} vertices pinned (sew phase only)")
     print()
 
     # --- State ---
@@ -216,6 +228,7 @@ def run_garment_drape(
         stretch_compliance=scaled_stretch,
         bend_compliance=scaled_bend,
         stitch_compliance=config.sew_stitch_compliance,  # Start with sew compliance
+        attachment_compliance=1e-4,   # Soft pin — panels can flex but won't tunnel through body
         max_stretch=fabric.max_stretch,
         max_compress=fabric.max_compress,
         stretch_damping=fabric.stretch_damping,

@@ -36,6 +36,7 @@ class XPBDSolver:
         stretch_compliance: float = 1e-8,
         bend_compliance: float = 1e-3,
         stitch_compliance: float = 1e-6,
+        attachment_compliance: float = 1e-4,
         max_stretch: float | None = None,
         max_compress: float | None = None,
         stretch_damping: float = 0.0,
@@ -66,6 +67,7 @@ class XPBDSolver:
         self.stretch_compliance = stretch_compliance
         self.bend_compliance = bend_compliance
         self._stitch_compliance = float(stitch_compliance)
+        self._attachment_compliance = float(attachment_compliance)
         self._max_stretch = float(max_stretch) if max_stretch is not None else None
         self._max_compress = float(max_compress) if max_compress is not None else None
         self._stretch_damping = float(stretch_damping)
@@ -90,9 +92,10 @@ class XPBDSolver:
         dt: float,
         rest_length_scale: float = 1.0,
         enable_strain_limit: bool = True,
+        enable_attachment: bool = False,
     ) -> None:
         """
-        Perform one solver iteration: distance → bending → stitch → strain limit.
+        Perform one solver iteration: distance → bending → stitch → attachment → strain limit.
 
         Called `solver_iterations` times per substep.
 
@@ -103,6 +106,8 @@ class XPBDSolver:
             enable_strain_limit: If False, skip the hard strain limit pass.
                 Disabled during sew phase to allow temporary over-compression
                 so seams can close without fighting the strain clamp.
+            enable_attachment: If True, project attachment constraints.
+                Should only be True during the sew phase.
         """
         # Distance constraints (edge length preservation)
         if self.constraints.distance is not None:
@@ -132,6 +137,16 @@ class XPBDSolver:
                 state.inv_mass,
                 self.constraints.stitch.n_stitches,
                 self._stitch_compliance,
+                dt,
+            )
+
+        # Attachment constraints (soft positional pins — sew phase only)
+        if enable_attachment and self.constraints.attachment is not None:
+            self.constraints.attachment.project(
+                state.positions,
+                state.inv_mass,
+                self.constraints.attachment.n_attachments,
+                self._attachment_compliance,
                 dt,
             )
 

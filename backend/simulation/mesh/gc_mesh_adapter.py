@@ -296,3 +296,86 @@ def build_garment_mesh_gc(
     bm.load()
 
     return boxmesh_to_garment_mesh(bm, fabric=fabric, body_z_offset=body_z_offset)
+
+
+def build_gc_attachment_constraints(
+    garment: GarmentMesh,
+    profile_path: str = "data/bodies/mannequin_profile.json",
+    max_per_panel: int = 40,
+    clearance: float = 0.020,
+) -> tuple[NDArray[np.int32], NDArray[np.float32]]:
+    """
+    Build soft positional attachment constraint vertex indices and targets.
+
+    For each panel, selects a subset of non-stitch interior vertices and
+    assigns a target Z position that keeps the panel on the correct side of
+    the body (back panels behind the back surface, front panels in front of
+    the front surface).  X and Y are kept equal to the current vertex position
+    so only the depth (Z) component is constrained.
+
+    Stitch vertices are explicitly excluded — they need full freedom to slide
+    laterally so seams can close.
+
+    Args:
+        garment:       GarmentMesh returned by build_garment_mesh_gc().
+        profile_path:  Path to mannequin_profile.json for body surface bounds.
+        max_per_panel: Maximum attachments sampled per panel (evenly spaced).
+        clearance:     Distance in metres outside the body surface for the
+                       target Z.  Should match sew_collision_thickness (0.020).
+
+    Returns:
+        vertex_indices:   (A,) int32 — global vertex indices to anchor.
+        target_positions: (A, 3) float32 — pin target (same XY, clamped Z).
+    """
+    from simulation.mesh.body_measurements import load_profile
+
+    profile = load_profile(profile_path)
+    n = garment.positions.shape[0]
+    offsets = garment.panel_offsets + [n]
+    pos = garment.positions  # (N, 3) float32
+
+    # Stitch vertices must remain free — exclude them from attachment selection
+    stitch_verts: set[int] = set(garment.stitch_pairs.flatten().tolist())
+
+    _BACK_KEYWORDS = ("btorso", "bsleeve", "back")
+
+    attach_indices: list[int] = []
+    attach_targets: list[list[float]] = []
+
+    for k, pid in enumerate(garment.panel_ids):
+        pid_lower = pid.lower()
+        is_back = any(kw in pid_lower for kw in _BACK_KEYWORDS)
+
+        panel_range = list(range(offsets[k], offsets[k + 1]))
+        # Exclude stitch vertices
+        free_verts = [v for v in panel_range if v not in stitch_verts]
+        if not free_verts:
+            continue
+
+        # Sample evenly up to max_per_panel
+        step = max(1, len(free_verts) // max_per_panel)
+        selected = free_verts[::step][:max_per_panel]
+
+        for vi in selected:
+            px = float(pos[vi, 0])
+            py = float(pos[vi, 1])
+
+            body_slice = profile.at_y(py)
+
+            if is_back:
+                # Keep back panel just behind the body back surface
+                target_z = body_slice.z_back - clearance
+            else:
+                # Keep front panel just in front of the body front surface
+                target_z = body_slice.z_front + clearance
+
+            attach_indices.append(vi)
+            attach_targets.append([px, py, target_z])
+
+    if not attach_indices:
+        return np.zeros(0, dtype=np.int32), np.zeros((0, 3), dtype=np.float32)
+
+    return (
+        np.array(attach_indices, dtype=np.int32),
+        np.array(attach_targets, dtype=np.float32),
+    )

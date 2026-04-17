@@ -15,6 +15,7 @@ from numpy.typing import NDArray
 from simulation.constraints.distance import DistanceConstraints
 from simulation.constraints.bending import BendingConstraints
 from simulation.constraints.stitch import StitchConstraints
+from simulation.constraints.attachment import AttachmentConstraints
 
 
 @dataclass
@@ -24,6 +25,7 @@ class ConstraintSet:
     distance: DistanceConstraints | None = None
     bending: BendingConstraints | None = None
     stitch: StitchConstraints | None = None
+    attachment: AttachmentConstraints | None = None
 
     def reset_lambdas(self) -> None:
         """Reset all Lagrange multipliers at the start of each substep."""
@@ -33,6 +35,8 @@ class ConstraintSet:
             self.bending.reset_lambdas()
         if self.stitch is not None:
             self.stitch.reset_lambdas()
+        if self.attachment is not None:
+            self.attachment.reset_lambdas()
 
 
 def build_constraints(

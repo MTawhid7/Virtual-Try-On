@@ -41,12 +41,13 @@ def run_trace(
 
     from simulation.collision import BodyCollider
     from simulation.constraints import build_constraints
+    from simulation.constraints.attachment import AttachmentConstraints
     from simulation.core.config import SimConfig
     from simulation.core.engine import SimulationEngine, compute_vertex_normals
     from simulation.core.state import ParticleState
     from simulation.export.gltf_writer import write_glb_with_body
     from simulation.materials import FABRIC_PRESETS
-    from simulation.mesh.gc_mesh_adapter import build_garment_mesh_gc
+    from simulation.mesh.gc_mesh_adapter import build_garment_mesh_gc, build_gc_attachment_constraints
     from simulation.mesh.grid import compute_area_weighted_inv_masses
     from simulation.solver.xpbd import XPBDSolver
 
@@ -107,6 +108,20 @@ def run_trace(
         stitch_pairs=gm.stitch_pairs if n_stitches > 0 else None,
         max_stitches=n_stitches + 10,
     )
+    # --- Attachment constraints (sew phase anchors) ---
+    attach_indices, attach_targets = build_gc_attachment_constraints(
+        gm,
+        profile_path="data/bodies/mannequin_profile.json",
+        clearance=0.020,   # 2cm clearance — decoupled from collision shell thickness
+    )
+    if len(attach_indices) > 0:
+        attach_constraints = AttachmentConstraints(max_attachments=len(attach_indices) + 50)
+        attach_constraints.initialize(attach_indices, attach_targets)
+        constraints.attachment = attach_constraints
+        print(f"  Attachment constraints: {len(attach_indices)} vertices pinned (sew phase only)")
+    else:
+        print("  Attachment constraints: none (no vertices selected)")
+
     state = ParticleState(config)
     state.load_from_numpy(
         gm.positions, faces=gm.faces, edges=gm.edges, inv_masses=inv_masses
@@ -121,6 +136,7 @@ def run_trace(
         stretch_compliance=fabric.stretch_compliance * scale,
         bend_compliance=fabric.bend_compliance * scale,
         stitch_compliance=config.sew_stitch_compliance,
+        attachment_compliance=1e-4,
         max_stretch=fabric.max_stretch,
         max_compress=fabric.max_compress,
         stretch_damping=fabric.stretch_damping,

@@ -202,6 +202,7 @@ class SimulationEngine:
                         config.substep_dt,
                         rest_length_scale=1.0,
                         enable_strain_limit=enable_strain_limit,
+                        enable_attachment=in_sew_phase,
                     )
 
                     # Body collision interleaved — static geometry, safe to repeat
