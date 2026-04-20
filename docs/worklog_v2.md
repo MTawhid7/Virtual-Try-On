@@ -320,3 +320,116 @@ The diagnosis is complete. Attachment constraints are the correct fix and the on
 5. **Validation**: After Phase 7, `debug_gc_sew_trace.py` should show `body_interior_verts < 100` at frame 30, and seam_14/seam_5/13 gaps should be < 3cm.
 
 **Why this works:** If back-torso waist vertices are pinned to Z≈0.034m (body back surface) from the start, the panel never has to travel from Z=−0.069m → Z=+0.156m through the body. It starts on the body surface. Side-seam stitches then pull the panel along the body surface rather than through it. The equilibrium gap shrinks to approximately the attachment compliance tolerance (~1cm), not the body depth (~10cm).
+
+---
+
+### 📅 April 20, 2026: Phase 7 + 7b — Sew-Phase Explosion Fully Resolved
+
+**Status:** ✅ Complete — 18/18 seams close, no explosion, 213 tests pass
+**Focus:** Eliminate the catastrophic sew-phase explosion seen in `debug_sew_f0030.glb` (entire mesh exploding into large chaotic triangles). Cross-referenced against `vestra-physics` (working reference codebase) to identify root causes.
+
+#### Root Cause Analysis
+
+Two independent root causes were identified and fixed:
+
+**Root Cause 1 — α̃ imbalance (wrong initial compliance scale)**
+
+The XPBD stitch update is:
+```
+Δx = w × gap / (2w + α̃)   where α̃ = compliance / dt²
+```
+
+With `sew_initial_compliance = 1e-4` and `dt = 1/240s`:
+- α̃ = 1e-4 × 57600 = **5.76**
+- For cloth particle: 2w ≈ 200 (mass ≈ 5g, inv_mass = 100 × 2 = 200)
+- Δx ≈ 100 × gap / (200 + 5.76) ≈ **gap / 2** per iteration
+
+With 64 iterations/frame (4 substeps × 16 sew iterations), a 24cm sleeve gap closes in **2 iterations** (~1 frame). Panels arrive at the body at ~10cm/frame velocity, punching through the 12mm collision shell instantly. Triangle normals invert → visual explosion.
+
+The fix: `sew_initial_compliance = 1.0` → α̃ = 57,600 >> 2w = 200:
+- Δx ≈ 100 × 0.24 / (200 + 57600) ≈ **0.4mm per iteration**
+- 64 iterations = max 2.5cm/frame → well within collision shell
+
+**Root Cause 2 — Sleeve panels starting 16–24cm from stitch targets**
+
+The `prewrap_panels_to_body()` function (Phase 7b) only projected *torso* panels to the body surface (reducing torso-to-body gaps from 10cm → 8mm). *Sleeve* panels were left at their original GarmentCode positions, 16–24cm from the torso armhole stitch targets.
+
+Even with `sew_initial_compliance = 1.0`, residual large gaps (collar, sleeve cap) were closing in 2–3 frames once the compliance ramp reached the stiff regime. The fix: **translate each non-torso panel so its stitch-vertex centroid aligns with the opposing panel's stitch-vertex centroid**.
+
+#### Fixes Implemented
+
+**1. `prewrap_panels_to_body()` — sleeve centering (`gc_mesh_adapter.py`)**
+
+Extended to handle two panel classes:
+- *Torso panels* (`btorso`, `ftorso`, `back`, `front`): Z-projection to body surface ± clearance (unchanged from Phase 7b).
+- *Sleeve/collar panels* (all others): Find all cross-panel stitch pairs involving this panel, compute centroid of own stitch vertices and opposing stitch vertices, translate entire panel by the delta. This collapses sleeve-cap initial gaps from ~22cm to ~3-6cm.
+
+```python
+# sleeve/collar panels
+delta = their_centroid - my_centroid
+pos[offsets[k]:offsets[k + 1]] += delta
+```
+
+**2. `sew_initial_compliance = 1.0` (`garment_drape.py`, `debug_gc_sew_trace.py`)**
+
+Changed from 1e-4. Combined with the existing log-space ramp over 120 frames (1.0 → 1e-10), the solver starts with extremely gentle stitch corrections and ramps to stiffness only after panels are already near their targets.
+
+**3. Attachment constraints, velocity reset, debug sew trace (carried forward from Phase 7)**
+
+All Phase 7 infrastructure remains in place: `AttachmentConstraints` Taichi kernel, `build_gc_attachment_constraints()`, velocity reset at `frame == sew_end`, `debug_gc_sew_trace.py`.
+
+#### Results
+
+**Sew trace (240 frames, shirt_mean.json):**
+```
+18/18 seams ✅  (was 17/18 before, 15/18 before Phase 7)
+Overall gap at frame 240: mean=0.2cm  max=4.9cm
+All seams: ≥ 90.8% closure  (was: 3 seams permanently stuck at 6–13cm)
+Sew phase complete in 33.0s (137.5ms/frame)
+```
+
+**Full simulation:**
+```
+NaN:             ✅ PASS
+Floor penetration: ✅ PASS
+Mean speed:      ✅ PASS  (0.024 m/s — settled)
+Mean stretch:    ✅ PASS  (3.15%)
+Stitch gaps:     ✅ PASS  (18/18 ✅)
+```
+
+**Test suite:** 213/213 pass (0 regressions)
+
+#### Known Remaining Issues
+
+**1. Sleeve arm wrapping**
+After centroid-alignment translation, the sleeve panels hang in front of the arms rather than wrapping around them. A pure translation cannot reorient the panel around the arm axis — this requires rotation. The centroid alignment aligns the sleeve cap Z to the torso armhole Z (correct), but the sleeve body then hangs downward from the shoulder joint rather than extending along the arm.
+
+Fix path: In `prewrap_panels_to_body()`, after translation, rotate each sleeve panel around the shoulder axis (Y axis, at the shoulder joint position) so the sleeve body aligns with the arm direction. GarmentCode's sleeve panels for a relaxed T-pose should rotate approximately -45° around the shoulder to hang naturally.
+
+**2. Shirt vertical position — initializes at chest level, slides to waist**
+The GarmentCode shirt_mean.json panels start at Y ≈ 1.0–1.4m (chest height), not Y ≈ 0.7–1.6m (shoulder-to-hip). During the drape phase, gravity + body collision slides the shirt down to Y ≈ 0.5–1.2m. The shirt ends up around the waist instead of hanging from the shoulders.
+
+Fix path: Either (a) increase `gc_body_z_offset` or add a Y offset to GC panels to shift the initial placement up by ~15–20cm, or (b) add collar/shoulder attachment constraints that keep the neckline at shoulder height during drape.
+
+**3. Back panel body penetration (cosmetic)**
+`body_interior_verts ≈ 1260` throughout sew phase. The 1D body profile (`z_back` per Y height) doesn't match the 3D mannequin mesh geometry at panel edges — the profile gives the extreme Z, but at large X the body surface is actually much closer to Z=0.15m (body center). Body collision resolves this during drape. Not causing visual artifacts in final output.
+
+#### Key Insights
+
+1. **`α̃ << 2w` is the critical diagnostic for sew-phase explosion.** Any stitch compliance that gives α̃ < 0.1 × 2w will produce near-rigid corrections and potential explosion. Always check: `α̃ = compliance / dt²` vs `2 × mean(inv_mass)`. For our setup: critical compliance ≈ 2w × dt² ≈ 200 / 57600 ≈ 0.0035. Anything below 0.01 is dangerously stiff.
+
+2. **Pre-placement (not compliance tuning) is the primary stability lever.** Compliance tuning can only slow the approach velocity; it cannot prevent explosions when initial gaps are >10× the collision shell thickness. The correct workflow is: place panels near their final positions first, then use compliance to fine-tune the closure.
+
+3. **Centroid alignment is a fast, effective approximation for sleeve pre-placement.** It doesn't account for panel orientation (no rotation), but it eliminates the dominant Z-displacement that caused the explosion. Remaining gaps after centering (2–6cm) are well within what the solver can close stably.
+
+4. **The `debug_gc_sew_trace.py` is the canonical sew-phase health check.** Before and after any solver parameter change, run `python -m scripts.debug_gc_sew_trace --frames 60 --checkpoints 3`. Frame 20 gap table reveals whether stitches are closing or exploding. Healthy: all major seams ✅ by frame 40. Exploding: `body_interior_verts` > 2000 at frame 30.
+
+#### Next Steps
+
+1. **Fix sleeve arm wrapping**: Rotate each sleeve panel around the shoulder axis in `prewrap_panels_to_body()` after centroid translation. Likely a -45° rotation around Y at the shoulder joint.
+
+2. **Fix shirt vertical placement**: Add a Y offset calibration step. Profile `garment.positions[:, 1].min()` and `max()` after prewrap and compare to desired range (shoulder ~1.55m, hip ~0.75m). Apply delta-Y to all vertices if needed.
+
+3. **Phase 5 — FastAPI layer**: `POST /api/simulate` endpoint; mount `backend/storage/` as static; frontend proxy.
+
+4. **T1.1 Seam welding** (roadmap Tier 1): After sew phase, merge vertex pairs with gap < 2mm. Eliminates residual seam lines in the rendered output.

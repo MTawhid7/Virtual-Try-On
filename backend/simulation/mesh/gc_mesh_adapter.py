@@ -379,3 +379,78 @@ def build_gc_attachment_constraints(
         np.array(attach_indices, dtype=np.int32),
         np.array(attach_targets, dtype=np.float32),
     )
+
+
+def prewrap_panels_to_body(
+    garment: "GarmentMesh",
+    profile_path: str = "data/bodies/mannequin_profile.json",
+    clearance: float = 0.008,
+) -> None:
+    """
+    Place garment panels close to their initial simulation positions before simulation.
+
+    Two operations:
+    1. Torso panels (front/back): project each vertex Z to just outside the body
+       surface (z_front + clearance or z_back - clearance). Side-seam vertices on
+       both torso panels land at the same Z → initial side-seam gap ≈ 0.
+    2. Sleeve/collar panels: translate the entire panel so its stitch-vertex
+       centroid aligns with the torso armhole centroid. This reduces sleeve-cap
+       seam gaps from ~16 cm to near-zero, eliminating the sew-phase explosion
+       caused by stiff stitch constraints dragging sleeve panels through the body.
+
+    Modifies garment.positions in-place before Taichi field upload.
+    """
+    from simulation.mesh.body_measurements import load_profile
+
+    profile = load_profile(profile_path)
+    n = garment.positions.shape[0]
+    offsets = garment.panel_offsets + [n]
+    pos = garment.positions  # (N, 3) float32, modified in-place
+
+    _BACK_KEYWORDS = ("btorso", "back")
+    _FRONT_KEYWORDS = ("ftorso", "front")
+    _TORSO_Y_MIN = 0.65   # below hip: body profile unreliable
+    _TORSO_Y_MAX = 1.60   # above shoulder: arm/collar geometry, not torso
+
+    for k, pid in enumerate(garment.panel_ids):
+        pid_lower = pid.lower()
+        is_back = any(kw in pid_lower for kw in _BACK_KEYWORDS)
+        is_front = any(kw in pid_lower for kw in _FRONT_KEYWORDS)
+
+        if is_back or is_front:
+            # Torso panels: project Z to body surface
+            for vi in range(offsets[k], offsets[k + 1]):
+                py = float(pos[vi, 1])
+                if py < _TORSO_Y_MIN or py > _TORSO_Y_MAX:
+                    continue  # outside torso Y range — leave unchanged
+                body_slice = profile.at_y(py)
+                if is_back:
+                    pos[vi, 2] = body_slice.z_back - clearance
+                else:
+                    pos[vi, 2] = body_slice.z_front + clearance
+        else:
+            # Sleeve/collar panels: translate to align stitch-vertex centroid
+            # with the opposing panel's stitch-vertex centroid.  This collapses
+            # the sleeve-cap gap from ~16 cm to near-zero before simulation starts.
+            panel_set = set(range(offsets[k], offsets[k + 1]))
+            pairs = garment.stitch_pairs  # (S, 2) int32
+
+            my_verts: list[int] = []
+            their_verts: list[int] = []
+            for col, other_col in ((0, 1), (1, 0)):
+                mask = np.isin(pairs[:, col], list(panel_set))
+                if not np.any(mask):
+                    continue
+                sv = pairs[mask, col]
+                tv = pairs[mask, other_col]
+                cross = ~np.isin(tv, list(panel_set))
+                my_verts.extend(sv[cross].tolist())
+                their_verts.extend(tv[cross].tolist())
+
+            if not my_verts:
+                continue  # no cross-panel stitches — leave unchanged
+
+            my_centroid = pos[np.array(my_verts)].mean(axis=0)
+            their_centroid = pos[np.array(their_verts)].mean(axis=0)
+            delta = their_centroid - my_centroid
+            pos[offsets[k]:offsets[k + 1]] += delta

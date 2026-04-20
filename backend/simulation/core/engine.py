@@ -172,6 +172,11 @@ class SimulationEngine:
         else:
             effective_config = config
 
+        # Zero velocities at the sew→drape transition so sewing momentum
+        # doesn't corrupt drape-phase initial conditions.
+        if frame == sew_end and not in_sew_phase and not in_trans:
+            state.velocities.fill(0.0)
+
         # Integrator is stateless, so instantiating here is extremely lightweight
         integrator = Integrator(
             dt=config.substep_dt,

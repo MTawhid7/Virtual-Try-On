@@ -28,7 +28,7 @@ from simulation.export.gltf_writer import write_glb_animated, write_glb_with_bod
 from simulation.materials import FABRIC_PRESETS
 from simulation.mesh.grid import compute_area_weighted_inv_masses
 from simulation.mesh.panel_builder import build_garment_mesh
-from simulation.mesh.gc_mesh_adapter import build_garment_mesh_gc, build_gc_attachment_constraints
+from simulation.mesh.gc_mesh_adapter import build_garment_mesh_gc, build_gc_attachment_constraints, prewrap_panels_to_body
 from simulation.constraints.attachment import AttachmentConstraints
 from simulation.solver.xpbd import XPBDSolver
 
@@ -106,7 +106,7 @@ def run_garment_drape(
         damping=fabric.damping,
         max_particles=50000,
         collision_thickness=0.012,
-        sew_collision_thickness=0.006,   # 6mm shell during sew — thin enough for seam closure
+        sew_collision_thickness=0.012,   # 12mm shell during sew — panels pre-wrapped to 8mm clearance
         friction_coefficient=fabric.friction,
         air_drag=0.3,
         sew_frames=240,
@@ -114,10 +114,10 @@ def run_garment_drape(
         sew_stitch_compliance=1e-10,
         drape_stitch_compliance=1e-8,
         transition_frames=30,        # smooth gravity+compliance ramp at sew→drape boundary
-        sew_ramp_frames=120,         # compliance ramps over 120 frames (was 60) — slower pull
-                                     # prevents panels from punching through body in first 30 frames
-        sew_initial_compliance=1e-4, # very soft start (was 1e-7) — panels move slowly at first,
-                                     # decelerating before they hit the body surface
+        sew_ramp_frames=120,
+        sew_initial_compliance=1.0,  # very soft start: α̃=57600 >> 2w≈200, so corrections
+                                     # are ~0.5 mm/iter (3 cm/frame max).  Prevents sleeve-cap
+                                     # explosion even if centroid-alignment leaves residual gaps.
         enable_self_collision=False,  # Disabled for 30fps
     )
 
@@ -141,6 +141,15 @@ def run_garment_drape(
             global_scale=1.0,
             target_edge=0.020,
         )
+    # Pre-wrap torso panels onto body surface (GC path only).
+    # Eliminates 10–30cm initial panel-to-body gap that causes sew-phase explosion.
+    if gc_pattern:
+        prewrap_panels_to_body(
+            garment,
+            profile_path="data/bodies/mannequin_profile.json",
+            clearance=0.008,  # 8mm outside body surface
+        )
+
     n_particles = garment.positions.shape[0]
     config.max_particles = max(n_particles + 200, 1000)
     n_stitches = garment.stitch_pairs.shape[0]
@@ -195,7 +204,7 @@ def run_garment_drape(
         attach_indices, attach_targets = build_gc_attachment_constraints(
             garment,
             profile_path="data/bodies/mannequin_profile.json",
-            clearance=0.020,   # 2cm clearance — keeps panels anchored outside body surface
+            clearance=0.005,  # 5mm outside body surface (panels pre-wrapped to 8mm)
         )
         if len(attach_indices) > 0:
             attach_constraints = AttachmentConstraints(max_attachments=len(attach_indices) + 50)
@@ -385,18 +394,23 @@ def run_garment_drape(
     body_faces_arr = np.array(body_mesh.faces, dtype=np.int32)
 
     if animate and frame_snaps is not None:
-        # Animated GLB: cloth morphs from flat panels → sewn → draped.
-        # Seam-weld the final snapshot so the last frame matches the static export.
+        # Animated GLB: drape phase only (skip sew + transition where panels fly around).
+        # frame_snaps[0] = initial flat layout; subsequent entries = every 5th frame.
+        # Drape phase starts at frame sew_frames + transition_frames.
+        record_every = 5
+        drape_start_frame = config.sew_frames + config.transition_frames
+        drape_start_idx = drape_start_frame // record_every  # snap index where drape begins
+        drape_snaps = frame_snaps[drape_start_idx:]
         anim_out = str(output_path).replace(".glb", "_animated.glb")
         out = write_glb_animated(
-            frame_snaps,
+            drape_snaps,
             garment.faces,
             body_verts,
             body_faces_arr,
-            fps=6.0,
+            fps=10.0,
             path=anim_out,
         )
-        print(f"\n  Animated export ({len(frame_snaps)} keyframes) → {out}")
+        print(f"\n  Animated export ({len(drape_snaps)} drape-phase keyframes) → {out}")
         # Also write the static final-frame GLB alongside it
         static_out = write_glb_with_body(
             final_positions, garment.faces,

@@ -129,10 +129,10 @@ python -m pytest tests/integration/ -v
 | **Sprint 3, Geometry Debug** | ✅ | Root-cause analysis scripts + fixes validated. Right sleeve surface irregularity resolved. Face winding correction + stitch clustering fix in `panel_builder.py`. |
 | **Sprint 3, Physics Solver** | 🔶 | Solver improvements: 2-stage sew/transition/drape with smooth compliance + gravity ramps, doubled sew iterations (64/frame), halved sew collision thickness. All 10 seams pass. Max seam gap 3.56cm (sleeve underarm — geometric constraint). 195/195 tests pass. Remaining: bend_compliance tuning, LRA tethers for underarm gap, back panel stretch. |
 | **Sprint 3, GarmentCode (Phases 1–3)** | ✅ | Vendored `pygarment`, replaced CGAL with `triangle` CDT, built `gc_mesh_adapter.py` (BoxMesh → GarmentMesh, non-manifold topology preserved), wired `--gc` flag. 195 tests passing. |
-| **Phase 4, GC Pipeline Validation** | 🔶 | Body Z-offset fix (+0.131m SMPL→mannequin alignment), fixed `--gc` arg in `__main__.py`, iterative seam densification, 12 new integration tests (207 total). shirt_mean.json: 5/6 checks pass. Sleeve cap gaps ~10cm and max stretch ~318% outlier remain — require Phase 7 attachment constraints. |
+| **Phase 4, GC Pipeline Validation** | ✅ | Body Z-offset fix (+0.131m SMPL→mannequin alignment), fixed `--gc` arg in `__main__.py`, iterative seam densification, 12 new integration tests (207 total). |
+| **Phase 7, Sew Stabilization** | ✅ | Attachment constraints (`simulation/constraints/attachment.py`), `prewrap_panels_to_body()` (torso Z-projection + sleeve centroid alignment), `sew_initial_compliance=1.0`, velocity reset at sew→drape. 18/18 seams ✅, 213 tests pass. Known: sleeves hang in front of arms; shirt Y placement low. |
 | **Phase 5, Backend API** | ⬜ | FastAPI layer to serve simulations via HTTP (pattern selector + fabric picker → run simulation). |
 | **Phase 6, Pattern Library** | ⬜ | Generate bodice, pants, skirts from GarmentCode programs; pattern selector in frontend. |
-| **Phase 7, Simulation Quality** | ⬜ | Attachment constraints (soft pins during sew phase), self-collision for layered garments. |
 | **Phase 8, 2D Pattern Editor** | ⬜ | Interactive SVG canvas for panel creation/editing + stitch definition; live re-simulation. |
 
 ## Technology Stack

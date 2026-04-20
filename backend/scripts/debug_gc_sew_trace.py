@@ -47,7 +47,7 @@ def run_trace(
     from simulation.core.state import ParticleState
     from simulation.export.gltf_writer import write_glb_with_body
     from simulation.materials import FABRIC_PRESETS
-    from simulation.mesh.gc_mesh_adapter import build_garment_mesh_gc, build_gc_attachment_constraints
+    from simulation.mesh.gc_mesh_adapter import build_garment_mesh_gc, build_gc_attachment_constraints, prewrap_panels_to_body
     from simulation.mesh.grid import compute_area_weighted_inv_masses
     from simulation.solver.xpbd import XPBDSolver
 
@@ -75,7 +75,7 @@ def run_trace(
         damping=fabric.damping,
         max_particles=50_000,
         collision_thickness=0.012,
-        sew_collision_thickness=0.006,
+        sew_collision_thickness=0.012,
         friction_coefficient=fabric.friction,
         air_drag=0.3,
         sew_frames=sew_frames,          # run only the sew phase
@@ -84,7 +84,7 @@ def run_trace(
         drape_stitch_compliance=1e-8,
         transition_frames=0,            # no transition — we stop at end of sew
         sew_ramp_frames=120,
-        sew_initial_compliance=1e-4,
+        sew_initial_compliance=1.0,
         enable_self_collision=False,
     )
 
@@ -94,6 +94,8 @@ def run_trace(
         mesh_resolution=mesh_resolution,
         body_z_offset=body_z_offset,
     )
+    # Pre-wrap torso panels onto body surface to eliminate sew-phase explosion.
+    prewrap_panels_to_body(gm, profile_path="data/bodies/mannequin_profile.json", clearance=0.008)
     n_particles = gm.positions.shape[0]
     config.max_particles = max(n_particles + 200, 1000)
     n_stitches = gm.stitch_pairs.shape[0]
@@ -112,7 +114,7 @@ def run_trace(
     attach_indices, attach_targets = build_gc_attachment_constraints(
         gm,
         profile_path="data/bodies/mannequin_profile.json",
-        clearance=0.020,   # 2cm clearance — decoupled from collision shell thickness
+        clearance=0.005,  # 5mm outside body surface (panels pre-wrapped to 8mm)
     )
     if len(attach_indices) > 0:
         attach_constraints = AttachmentConstraints(max_attachments=len(attach_indices) + 50)
