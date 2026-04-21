@@ -129,7 +129,8 @@ class SimulationEngine:
         if in_sew_phase:
             gravity_scale     = config.sew_gravity_fraction
             stitch_compliance = config.sew_stitch_compliance
-            enable_strain_limit = False
+            enable_strain_limit = True
+            strain_override = config.sew_max_stretch
 
             # Optional compliance ramp: start soft, tighten over sew_ramp_frames
             if config.sew_ramp_frames > 0 and 0 <= frame < config.sew_ramp_frames:
@@ -145,12 +146,14 @@ class SimulationEngine:
             log_s = math.log10(config.sew_stitch_compliance)
             log_d = math.log10(config.drape_stitch_compliance)
             stitch_compliance = 10.0 ** (log_s + t * (log_d - log_s))
-            enable_strain_limit = False  # keep off during transition
+            enable_strain_limit = True
+            strain_override = config.sew_max_stretch   # keep relaxed during transition
 
         else:
             gravity_scale     = 1.0
             stitch_compliance = config.drape_stitch_compliance
             enable_strain_limit = True
+            strain_override = None   # use fabric-preset max_stretch
 
         enable_self_collision = (
             config.enable_self_collision
@@ -208,14 +211,29 @@ class SimulationEngine:
                         rest_length_scale=1.0,
                         enable_strain_limit=enable_strain_limit,
                         enable_attachment=in_sew_phase,
+                        strain_max_stretch_override=strain_override,
                     )
 
                     # Body collision interleaved — static geometry, safe to repeat
                     if self.collider is not None:
-                        self.collider.resolve(state, effective_config)
+                        # Layer 6: physics-derived contact speed limit (vestra pattern).
+                        # max_v = thickness * 0.9 / substep_dt — particle can't approach
+                        # faster than the collision shell can catch it in one substep.
+                        physics_speed_limit = (
+                            effective_config.collision_thickness * 0.9 / config.substep_dt
+                        )
+                        col_config = dc_replace(
+                            effective_config, contact_speed_limit=physics_speed_limit
+                        )
+                        self.collider.resolve(state, col_config)
 
             # 5. Update velocities from position delta + damping
             integrator.update(state)
+
+            # 5b. Layer 3: hard velocity backstop — clamp any particle exceeding
+            # max_speed after constraint solving.  Catches explosion that slips
+            # through all other layers without affecting normal cloth dynamics.
+            integrator.cap_velocity(state, config.max_speed)
 
             # 6. Constraint-based velocity damping (once per substep, after velocity update)
             if self.solver is not None and hasattr(self.solver, 'apply_damping'):

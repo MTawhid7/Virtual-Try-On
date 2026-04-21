@@ -28,7 +28,7 @@ from simulation.export.gltf_writer import write_glb_animated, write_glb_with_bod
 from simulation.materials import FABRIC_PRESETS
 from simulation.mesh.grid import compute_area_weighted_inv_masses
 from simulation.mesh.panel_builder import build_garment_mesh
-from simulation.mesh.gc_mesh_adapter import build_garment_mesh_gc, build_gc_attachment_constraints, prewrap_panels_to_body
+from simulation.mesh.gc_mesh_adapter import build_garment_mesh_gc, build_gc_attachment_constraints, prewrap_panels_to_body, calibrate_garment_y, resolve_initial_penetrations
 from simulation.constraints.attachment import AttachmentConstraints
 from simulation.solver.xpbd import XPBDSolver
 
@@ -99,26 +99,24 @@ def run_garment_drape(
     print(f"  Body proxy: {collider.spatial_hash.n_triangles} triangles\n")
 
     config = SimConfig(
-        total_frames=570,            # 240 sew + 30 transition + 300 drape (was 390)
-        substeps=4,
-        solver_iterations=8,
-        sew_solver_iterations=16,    # 4×16=64 solves/frame during sew (was 4×8=32)
+        total_frames=570,            # 240 sew + 30 transition + 300 drape
+        substeps=8,                  # 4 → 8: more constraint resolution per frame
+        solver_iterations=16,        # 8 → 16: better drape-phase convergence
+        sew_solver_iterations=32,    # 16 → 32: 8×32=256 solves/frame during sew
         damping=fabric.damping,
         max_particles=50000,
-        collision_thickness=0.012,
-        sew_collision_thickness=0.012,   # 12mm shell during sew — panels pre-wrapped to 8mm clearance
+        collision_thickness=0.007,   # 0.012 → 0.007: closer body contact; safe with contact algorithms
+        sew_collision_thickness=0.012,   # keep sew shell thick — panels still moving
         friction_coefficient=fabric.friction,
         air_drag=0.3,
         sew_frames=240,
         sew_gravity_fraction=0.15,
         sew_stitch_compliance=1e-10,
         drape_stitch_compliance=1e-8,
-        transition_frames=30,        # smooth gravity+compliance ramp at sew→drape boundary
+        transition_frames=30,
         sew_ramp_frames=120,
-        sew_initial_compliance=1.0,  # very soft start: α̃=57600 >> 2w≈200, so corrections
-                                     # are ~0.5 mm/iter (3 cm/frame max).  Prevents sleeve-cap
-                                     # explosion even if centroid-alignment leaves residual gaps.
-        enable_self_collision=False,  # Disabled for 30fps
+        sew_initial_compliance=1.0,  # α̃=57600 >> 2w≈200 → ~0.5mm/iter, no tunneling
+        enable_self_collision=False,
     )
 
     # --- Garment mesh ---
@@ -128,7 +126,7 @@ def run_garment_drape(
         print(f"  GC body Z offset: {gc_body_z_offset:+.4f}m")
         garment = build_garment_mesh_gc(
             gc_pattern,
-            mesh_resolution=1.5,   # 1.5cm: finer than default 2cm → more stitch pairs
+            mesh_resolution=1.5,   # kept at 1.5cm: 1.0cm caused degenerate seam topology
             fabric="cotton",
             body_z_offset=gc_body_z_offset,
         )
@@ -141,14 +139,13 @@ def run_garment_drape(
             global_scale=1.0,
             target_edge=0.020,
         )
-    # Pre-wrap torso panels onto body surface (GC path only).
-    # Eliminates 10–30cm initial panel-to-body gap that causes sew-phase explosion.
+    # GC path: calibrate vertical placement then 3D-prewrap panels onto body surface.
     if gc_pattern:
-        prewrap_panels_to_body(
-            garment,
-            profile_path="data/bodies/mannequin_profile.json",
-            clearance=0.008,  # 8mm outside body surface
-        )
+        calibrate_garment_y(garment, "data/bodies/mannequin_profile.json")
+        prewrap_panels_to_body(garment, clearance=0.008)
+        n_corr = resolve_initial_penetrations(garment, clearance=0.008)
+        if n_corr:
+            print(f"  Penetration resolver: corrected {n_corr} inside-body vertices")
 
     n_particles = garment.positions.shape[0]
     config.max_particles = max(n_particles + 200, 1000)
@@ -184,7 +181,8 @@ def run_garment_drape(
     print()
 
     inv_masses = compute_area_weighted_inv_masses(
-        garment.positions, garment.faces, fabric.density
+        garment.positions, garment.faces, fabric.density,
+        max_inv_mass=config.max_inv_mass,
     )
 
     # --- Constraints ---
@@ -201,11 +199,7 @@ def run_garment_drape(
 
     # --- Attachment constraints (GC path only — sew phase panel anchoring) ---
     if gc_pattern:
-        attach_indices, attach_targets = build_gc_attachment_constraints(
-            garment,
-            profile_path="data/bodies/mannequin_profile.json",
-            clearance=0.005,  # 5mm outside body surface (panels pre-wrapped to 8mm)
-        )
+        attach_indices, attach_targets = build_gc_attachment_constraints(garment)
         if len(attach_indices) > 0:
             attach_constraints = AttachmentConstraints(max_attachments=len(attach_indices) + 50)
             attach_constraints.initialize(attach_indices, attach_targets)

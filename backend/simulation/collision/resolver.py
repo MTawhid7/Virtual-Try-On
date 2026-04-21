@@ -26,6 +26,7 @@ _P3 = 83492791
 def resolve_body_collision(
     positions: ti.template(),
     predicted: ti.template(),
+    velocities: ti.template(),
     inv_mass: ti.template(),
     n_particles: ti.i32,
     # Spatial hash arrays
@@ -46,11 +47,14 @@ def resolve_body_collision(
     # Collision parameters
     thickness: ti.f32,
     friction: ti.f32,
+    contact_damping: ti.f32,
+    contact_speed_limit: ti.f32,
+    collision_stiffness: ti.f32,
 ):
     """
     Resolve body mesh collisions for all cloth particles.
 
-    For each particle:
+    Position-level response (existing):
         1. Skip if pinned (inv_mass <= 0)
         2. Query spatial hash: search 27 cells (3×3×3 neighborhood) for candidate triangles
         3. For each candidate: compute closest point + signed distance
@@ -58,9 +62,18 @@ def resolve_body_collision(
         5. Push particle to surface + thickness along interpolated normal
         6. Apply position-based friction (same as SphereCollider)
 
-    Using the closest penetrating triangle (not the first) prevents conflicting
-    push directions when a particle is near multiple body triangles simultaneously
-    — an issue from Vestra's early mesh collision implementation.
+    Velocity-level response (three energy-damping algorithms):
+        Algorithm 1 — Inelastic contact: when actively penetrating, zero the remaining
+            inward normal velocity.  Prevents the approach momentum from carrying the
+            particle back through the surface on the next substep.
+        Algorithm 2 — Contact zone damping: within 3×thickness, apply per-iteration
+            velocity decay.  Accumulates to ~10% energy loss per substep with 16
+            solver iterations.  Dissipates the oscillation energy that makes cloth
+            "buzz" at the body surface.
+        Algorithm 3 — Pre-contact approach speed cap: within 5×thickness, clamp the
+            inward velocity to contact_speed_limit.  Prevents sew-phase stitch forces
+            or rapid gravity acceleration from building explosion-speed momentum before
+            the collision zone even fires.
     """
     for i in range(n_particles):
         if inv_mass[i] <= 0.0:
@@ -186,6 +199,13 @@ def resolve_body_collision(
         if found == 1 and best_sd < thickness and outward_check >= -0.05:
             surface_pos = best_closest + thickness * best_normal
 
+            # Soft collision stiffness (vestra pattern):
+            # Use full stiffness when truly penetrating (sd < 0) so the particle escapes.
+            # Use collision_stiffness (0.75) in the contact zone (sd >= 0) to prevent
+            # kick-back explosions from over-correction.  With 16+ solver iterations the
+            # soft push converges: remaining gap after k iters ≈ (1 - stiffness)^k × gap_0.
+            stiffness = ti.f32(1.0) if best_sd < 0.0 else collision_stiffness
+
             # Position-based friction (same as SphereCollider):
             # Decompose displacement from substep start into normal + tangential,
             # scale tangential by (1 - friction). update_velocities() picks up
@@ -193,11 +213,10 @@ def resolve_body_collision(
             disp = surface_pos - predicted[i]
             d_normal = disp.dot(best_normal) * best_normal
             d_tangential = disp - d_normal
-            positions[i] = predicted[i] + d_normal + d_tangential * (1.0 - friction)
-            # Cancel only the normal velocity injection (inelastic collision in normal dir).
-            # Preserve tangential velocity so cloth can slide along the body surface.
-            # velocity = (positions[i] - predicted_new) / dt = d_tangential*(1-friction)/dt
-            predicted[i] = predicted[i] + d_normal
+            positions[i] = predicted[i] + d_normal * stiffness + d_tangential * (1.0 - friction)
+            # Cancel normal velocity injection scaled by stiffness so predicted tracks
+            # the actual position correction (prevents velocity over-cancellation).
+            predicted[i] = predicted[i] + d_normal * stiffness
 
         # Resting contact friction: particle is in the contact zone but NOT penetrating.
         # Using elif guarantees mutual exclusion with the penetration block above —
@@ -214,3 +233,51 @@ def resolve_body_collision(
             # velocity naturally via update_velocities. Setting predicted[i]=positions[i]
             # would zero ALL velocity for every particle within 5×thickness of the body,
             # freezing the cloth and preventing natural draping along the surface.
+
+        # Emergency escape: particle is deeply inside the body (outward_check < -0.05).
+        # The interpolated normal is unreliable at this depth — a position push could
+        # inject energy in the wrong direction.  Zero velocity instead so momentum can't
+        # build up; the particle drifts out under stitch/gravity forces and re-enters the
+        # normal collision zone.  This case is rare after resolve_initial_penetrations()
+        # removes all inside-body vertices before simulation starts.
+        elif found == 1 and best_sd < thickness and outward_check < -0.05:
+            velocities[i] = velocities[i] * ti.f32(0.0)
+
+        # -----------------------------------------------------------------------
+        # Velocity-level energy damping (Algorithms 1–3).
+        # Operates on velocities[] which holds momentum from the PREVIOUS substep.
+        # These are complementary to the position-level push-out above: the push-out
+        # handles WHERE the particle ends up; these algorithms handle HOW FAST it
+        # arrives at the next substep, preventing momentum from building across the
+        # gap between substeps.
+        # -----------------------------------------------------------------------
+        if found == 1 and outward_check >= -0.05:
+
+            # Algorithm 2 — Contact zone damping.
+            # Exponential velocity decay within 3×thickness of the body.
+            # Models micro-friction energy absorption that damps cloth oscillations
+            # against the body surface.  Applied per solver-iteration; with 16
+            # iterations, (1 - contact_damping)^16 ≈ 0.90 → ~10% loss per substep.
+            if best_euclidean < thickness * 3.0:
+                velocities[i] = velocities[i] * (1.0 - contact_damping)
+
+            # Algorithm 3 — Pre-contact approach speed cap.
+            # Within a broad 5×thickness proximity zone, clamp the inward velocity
+            # component to contact_speed_limit.  This prevents stitch forces or
+            # rapid gravity acceleration from building tunneling-speed momentum
+            # before the collision push-out zone even fires.
+            if best_euclidean < thickness * 5.0:
+                v_n3 = velocities[i].dot(best_normal)
+                if v_n3 < -contact_speed_limit:
+                    velocities[i] = velocities[i] - (v_n3 + contact_speed_limit) * best_normal
+
+            # Algorithm 1 — Inelastic contact (e = 0 restitution).
+            # When actively penetrating, zero the remaining inward velocity component.
+            # The position push-out (above) already cancels velocity injected BY this
+            # correction (via predicted[i] += d_normal).  This step cancels the
+            # INCOMING velocity that brought the particle here — preventing the same
+            # approach momentum from reloading at the start of the next substep.
+            if best_sd < thickness:
+                v_n1 = velocities[i].dot(best_normal)
+                if v_n1 < 0.0:
+                    velocities[i] = velocities[i] - v_n1 * best_normal

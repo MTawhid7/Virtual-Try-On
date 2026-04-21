@@ -39,9 +39,26 @@ class SimConfig:
     max_displacement: float = 0.05           # 5cm per substep — tunneling guard
     air_drag: float = 0.0                    # Exponential velocity drag coefficient per substep (0 = disabled)
     self_collision_thickness: float = 0.004  # 4mm cloth self-collision push-out
+    # --- Contact energy algorithms ---
+    contact_damping: float = 0.007           # Per-iteration velocity decay in the 3×thickness contact band.
+                                             # With 16 solver iters: (1-0.007)^16 ≈ 0.90 → ~10%/substep.
+    contact_speed_limit: float = 1.5        # Fallback max m/s toward body; engine overrides with
+                                             # physics-derived value: collision_thickness * 0.9 / substep_dt.
+    collision_stiffness: float = 0.75       # Fractional push-out for the contact zone (sd ≥ 0).
+                                             # Full stiffness (1.0) applied when sd < 0 (truly penetrating).
+                                             # Soft contact prevents kick-back explosion (vestra pattern).
 
     # --- Self-collision control ---
     enable_self_collision: bool = False      # Disabled by default for performance (GPU→CPU sync)
+
+    # --- Unconditional stability backstops ---
+    max_speed: float = 20.0                 # Hard per-substep velocity ceiling (m/s). Catches any explosion
+                                             # that slips through layers 1–6. Real cloth at 20 m/s tears.
+    max_inv_mass: float = 5000.0            # Per-vertex inv_mass cap. Prevents 0.3mm CDT boundary triangles
+                                             # from producing XPBD corrections of ~gap magnitude per iteration.
+    sew_max_stretch: float = 5.0            # Relaxed fabric strain limit during sew + transition phases
+                                             # (500% = 5× rest length). Bounds stitch-induced stretching
+                                             # without blocking seam closure (stitch pairs unaffected).
 
     # --- Mesh ---
     max_particles: int = 50_000      # Upper bound for Taichi field allocation

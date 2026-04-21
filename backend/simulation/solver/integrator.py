@@ -83,6 +83,28 @@ def update_velocities(
             velocities[i] = ti.Vector([0.0, 0.0, 0.0])
 
 
+@ti.kernel
+def apply_velocity_cap(
+    velocities: ti.template(),
+    inv_mass: ti.template(),
+    n_particles: ti.i32,
+    max_speed: ti.f32,
+):
+    """
+    Hard per-substep velocity ceiling. Scales any particle exceeding max_speed
+    back to exactly max_speed, preserving direction.  Called after update_velocities()
+    each substep so constraint-derived velocities can't propagate explosion into the
+    next substep's predict step.  Complements max_displacement (which caps velocity
+    going INTO predict) — together they bracket the full substep.
+    """
+    for i in range(n_particles):
+        if inv_mass[i] <= 0.0:
+            continue
+        speed = velocities[i].norm()
+        if speed > max_speed and speed > 1e-8:
+            velocities[i] = velocities[i] * (max_speed / speed)
+
+
 class Integrator:
     """
     Stateless integrator wrapping the Taichi kernels.
@@ -125,4 +147,13 @@ class Integrator:
             state.n_particles,
             self.dt,
             self.damping,
+        )
+
+    def cap_velocity(self, state: ParticleState, max_speed: float) -> None:
+        """Hard velocity ceiling — unconditional backstop after constraint solving."""
+        apply_velocity_cap(
+            state.velocities,
+            state.inv_mass,
+            state.n_particles,
+            max_speed,
         )

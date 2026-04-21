@@ -47,7 +47,7 @@ def run_trace(
     from simulation.core.state import ParticleState
     from simulation.export.gltf_writer import write_glb_with_body
     from simulation.materials import FABRIC_PRESETS
-    from simulation.mesh.gc_mesh_adapter import build_garment_mesh_gc, build_gc_attachment_constraints, prewrap_panels_to_body
+    from simulation.mesh.gc_mesh_adapter import build_garment_mesh_gc, build_gc_attachment_constraints, prewrap_panels_to_body, calibrate_garment_y, resolve_initial_penetrations
     from simulation.mesh.grid import compute_area_weighted_inv_masses
     from simulation.solver.xpbd import XPBDSolver
 
@@ -69,12 +69,12 @@ def run_trace(
     # --- Config — mirrors garment_drape.py exactly, but total_frames=sew_frames ---
     config = SimConfig(
         total_frames=sew_frames,
-        substeps=4,
-        solver_iterations=8,
-        sew_solver_iterations=16,
+        substeps=8,
+        solver_iterations=16,
+        sew_solver_iterations=32,
         damping=fabric.damping,
         max_particles=50_000,
-        collision_thickness=0.012,
+        collision_thickness=0.007,
         sew_collision_thickness=0.012,
         friction_coefficient=fabric.friction,
         air_drag=0.3,
@@ -94,15 +94,22 @@ def run_trace(
         mesh_resolution=mesh_resolution,
         body_z_offset=body_z_offset,
     )
-    # Pre-wrap torso panels onto body surface to eliminate sew-phase explosion.
-    prewrap_panels_to_body(gm, profile_path="data/bodies/mannequin_profile.json", clearance=0.008)
+    # Calibrate vertical placement then 3D-prewrap panels onto body surface.
+    calibrate_garment_y(gm, "data/bodies/mannequin_profile.json")
+    prewrap_panels_to_body(gm, clearance=0.008)
+    n_corr = resolve_initial_penetrations(gm, clearance=0.008)
+    if n_corr:
+        print(f"  Penetration resolver: corrected {n_corr} inside-body vertices")
     n_particles = gm.positions.shape[0]
     config.max_particles = max(n_particles + 200, 1000)
     n_stitches = gm.stitch_pairs.shape[0]
     offsets = gm.panel_offsets + [n_particles]
 
     # --- Physics setup ---
-    inv_masses = compute_area_weighted_inv_masses(gm.positions, gm.faces, fabric.density)
+    inv_masses = compute_area_weighted_inv_masses(
+        gm.positions, gm.faces, fabric.density,
+        max_inv_mass=config.max_inv_mass,
+    )
     constraints = build_constraints(
         positions=gm.positions,
         edges=gm.edges,
@@ -111,11 +118,7 @@ def run_trace(
         max_stitches=n_stitches + 10,
     )
     # --- Attachment constraints (sew phase anchors) ---
-    attach_indices, attach_targets = build_gc_attachment_constraints(
-        gm,
-        profile_path="data/bodies/mannequin_profile.json",
-        clearance=0.005,  # 5mm outside body surface (panels pre-wrapped to 8mm)
-    )
+    attach_indices, attach_targets = build_gc_attachment_constraints(gm)
     if len(attach_indices) > 0:
         attach_constraints = AttachmentConstraints(max_attachments=len(attach_indices) + 50)
         attach_constraints.initialize(attach_indices, attach_targets)

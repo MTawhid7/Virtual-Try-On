@@ -16,7 +16,6 @@ kernels live in resolver.py).
 from __future__ import annotations
 
 import logging
-import warnings
 from pathlib import Path
 
 import numpy as np
@@ -130,6 +129,7 @@ class BodyCollider:
         resolve_body_collision(
             state.positions,
             state.predicted,
+            state.velocities,
             state.inv_mass,
             state.n_particles,
             sh.cell_start,
@@ -146,4 +146,7 @@ class BodyCollider:
             sh.table_size,
             config.collision_thickness,
             config.friction_coefficient,
+            config.contact_damping,
+            config.contact_speed_limit,
+            config.collision_stiffness,
         )

@@ -93,6 +93,7 @@ class XPBDSolver:
         rest_length_scale: float = 1.0,
         enable_strain_limit: bool = True,
         enable_attachment: bool = False,
+        strain_max_stretch_override: float | None = None,
     ) -> None:
         """
         Perform one solver iteration: distance → bending → stitch → attachment → strain limit.
@@ -151,21 +152,29 @@ class XPBDSolver:
             )
 
         # Hard strain limit — clamp edges to [1-max_compress, 1+max_stretch] × L₀
-        # Disabled during sew phase to avoid fighting stitch closure
+        # strain_max_stretch_override lets the engine pass a relaxed limit (e.g. 5.0)
+        # during the sew phase so tiny CDT triangles can't produce unconstrained
+        # XPBD corrections, while seam closure (via zero-rest-length stitch pairs)
+        # is unaffected.
         if (
             enable_strain_limit
             and self.constraints.distance is not None
-            and self._max_stretch is not None
             and self._max_compress is not None
         ):
-            self.constraints.distance.apply_strain_limit(
-                state.positions,
-                state.inv_mass,
-                self.constraints.distance.n_edges,
-                self._max_stretch,
-                self._max_compress,
-                rest_length_scale,
+            eff_max_stretch = (
+                strain_max_stretch_override
+                if strain_max_stretch_override is not None
+                else self._max_stretch
             )
+            if eff_max_stretch is not None:
+                self.constraints.distance.apply_strain_limit(
+                    state.positions,
+                    state.inv_mass,
+                    self.constraints.distance.n_edges,
+                    eff_max_stretch,
+                    self._max_compress,
+                    rest_length_scale,
+                )
 
     def apply_damping(self, state: ParticleState) -> None:
         """

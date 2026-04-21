@@ -31,6 +31,7 @@ def compute_area_weighted_inv_masses(
     positions: NDArray[np.float32],
     faces: NDArray[np.int32],
     density: float,
+    max_inv_mass: float = 5000.0,
 ) -> NDArray[np.float32]:
     """
     Compute per-vertex inverse masses using the lumped-mass FEM approach.
@@ -61,7 +62,8 @@ def compute_area_weighted_inv_masses(
     np.add.at(vertex_area, faces[:, 2], tri_areas / 3.0)
 
     vertex_area = np.maximum(vertex_area, 1e-12)  # guard against degenerate verts
-    return (1.0 / (density * vertex_area)).astype(np.float32)
+    inv_mass = 1.0 / (density * vertex_area)
+    return np.minimum(inv_mass, max_inv_mass).astype(np.float32)
 
 
 def generate_grid(

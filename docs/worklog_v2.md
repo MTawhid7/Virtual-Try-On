@@ -323,6 +323,115 @@ The diagnosis is complete. Attachment constraints are the correct fix and the on
 
 ---
 
+### 📅 April 21, 2026: Panel Placement Investigation — Sleeve Z Preservation
+
+**Status:** 🔶 Partial progress — 216/216 tests pass, 18/18 seams close, visual placement still incorrect
+**Focus:** Fix the severe deformation seen after Phase 1 (sleeve cylinder wrap) and Phase 2 (z_back/z_front side-vertex snap) were reverted. Identify and implement the correct sleeve placement strategy.
+
+#### Work Completed
+
+**1. Completed revert of Phase 1 and Phase 2**
+
+Both experimental placement changes were reverted:
+- Phase 1 (sleeve cylinder wrap): Removed entire "Pass 2b" block from `prewrap_panels_to_body()`. The arc-length formula `r = half_width × 2/π` is invalid because GarmentCode sleeve panels have a 50.48° Z-rotation — the X span measures the rotated diagonal, not the arm circumference.
+- Phase 2 (side-vertex Z snap): Reverted `z_back - clearance` / `z_front + clearance` back to `Z = center_z`. Setting torso side vertices to body surface Z increases side-seam initial gaps from ~0cm to ~26cm, which the sew phase could not reliably close.
+
+**2. Fixed test_prewrap.py**
+
+Three changes to restore the test suite after the revert:
+- Removed the Z-spread curvature assertion (`panel_z.max() - panel_z.min() > 0.01`) — only applied when cylinder wrap existed
+- Changed centroid gap threshold from 15cm back to 8cm
+- Removed unused `_SLEEVE_KWS` variable
+
+**3. Sleeve Z preservation in centroid alignment**
+
+Key insight: GarmentCode already places sleeves at the **correct Z** for their body-side designation:
+- Front sleeves: Z ≈ 0.306m (near body front surface z_front ≈ 0.279m)
+- Back sleeves: Z ≈ 0.006m (near body back surface z_back ≈ 0.034m)
+
+The previous full-XYZ centroid alignment `pos[offsets[k]:offsets[k+1]] += delta` pulled both front and back sleeves to Z ≈ 0.185m (body interior), destroying this intentional placement and causing the "cling to body" deformation.
+
+Fix: Set `delta[2] = 0.0` before applying the translation to any sleeve panel (keyword `"sleeve"` in `pid_lower`). Now centroid alignment corrects only X and Y positions; Z is preserved from GarmentCode.
+
+Updated `test_sleeve_panels_centered_on_stitch_targets` to measure only the XY centroid gap (expected < 8cm), since Z is now intentionally preserved.
+
+#### Validation Results
+
+```
+Tests: 216/216 pass (0 regressions)
+
+Sew trace (240 frames, shirt_mean.json):
+  18/18 seams ✅  (armhole seam initial gaps increased to ~30cm; all close to <2cm by frame 240)
+  Sew phase complete in 310.7s (1294.6ms/frame)
+```
+
+Seam closure with sleeve Z preservation:
+
+| Seam | Initial | Final | Status |
+|------|---------|-------|--------|
+| seam_0 (armhole) | 30.0cm | 0.8cm | ✅ |
+| seam_1 (armhole) | 30.0cm | 0.8cm | ✅ |
+| seam_2 | 18.0cm | 0.2cm | ✅ |
+| seam_3 | 24.5cm | 1.7cm | ✅ |
+| seam_8 (armhole) | 30.0cm | 0.8cm | ✅ |
+| seam_9 (armhole) | 30.0cm | 0.3cm | ✅ |
+| All 18 seams | — | < 2cm | ✅ |
+
+#### Issues Observed Visually
+
+After reviewing `debug_sew_f0000.glb` (initial placement) and `garment_drape_animated.glb` in the frontend viewer:
+
+**Issue 1: Torso panel edges appear "sealed" together at the sides**
+
+Front and back torso panel side-seam vertices both land at Z = center_z ≈ 0.185m (body interior depth). Because both sides land at the same Z, the side seams start with zero gap — the constraint has nothing to close. The torso wraps tightly to the body surface in the front/back center, but the edges extend past the body width and appear fused together rather than conforming naturally. This is cosmetically wrong even if seam gap metrics report ✅.
+
+Root cause: `pos[vi, 2] = cz` for `|sin_t| > 1` vertices places BOTH front and back panel side edges at the same Z, which happens to be the body center. The seam gap is zero but the geometry looks unnatural.
+
+**Issue 2: Sleeves on incorrect arm sides and flat**
+
+From the side view, the sleeves appear as flat diamond/triangular sheets extending from the shoulders at angles unrelated to the arms. Preserving Z is correct for keeping them on the right body side, but:
+- The XY centroid alignment may be placing sleeves at the torso armhole XY (which is at X≈0 — the body center line), not at the arm location
+- Front/back sleeve identification from panel names vs. actual visual placement needs verification
+- Sleeves remain entirely flat (constant Z) — they need to wrap around the arm cylinder for natural appearance
+
+**Issue 3: Drape animation retains initial shape**
+
+The fabric in the animated GLB retains the deformed shape from the sew phase and shows minimal draping motion. This suggests:
+- Either the sew-phase initial placement is still significantly wrong, producing large internal stresses that don't relax
+- Or the drape phase is too short / gravity too weak relative to attachment constraints
+
+#### Key Insights
+
+1. **Unit test passage ≠ correct visual placement.** All 6 prewrap tests pass, 18/18 seams close, yet the visual output is still wrong. Tests verify local geometric invariants (ellipse radius, gap < N cm) but cannot verify that panels are on the correct sides of the body or that the shape looks garment-like. Visual inspection against the reference (CLO3D) must be the primary validation gate for placement work.
+
+2. **GarmentCode Z placement is intentional and correct for body-side designation, but not for XY.** The Z values (0.006m, 0.306m) tell which side of the body each sleeve panel faces. The XY values after translation tell WHERE on the body. These two concerns must be managed independently.
+
+3. **The centroid alignment reference point matters.** The torso armhole ring centroid (used as reference for XY alignment) is at approximately X = ±0.12m (half the body width), not at X = 0. If the sleeve panel centroid is being moved to the wrong reference point, sleeves will misalign. The `their_torso_verts` filter must correctly select only the torso armhole boundary vertices, not all torso vertices.
+
+4. **"Zero gap = zero problem" is a false metric for seam quality.** Side seams that start at Z=center_z have zero gap but are visually incorrect. Better metrics: are the panel vertices on the correct side of the body surface? Is the panel normal pointing away from the body?
+
+5. **Better tooling needed.** The per-frame GLB snapshots from `debug_gc_sew_trace.py` show the sew phase, but there is no equivalent for detailed per-panel initial placement inspection. A color-coded panel placement script (one color per panel, visible in the viewer) would catch XY/Z misplacements immediately without running a full 240-frame trace.
+
+#### Future Plans
+
+**Immediate — Better placement diagnostics:**
+- Extend `scripts/debug_gc_panel_placement.py` to export a GLB with per-panel color coding AND per-vertex body-surface distance arrows. This will reveal immediately which panels are on the wrong side of the body.
+- Add a placement validation script that checks each panel centroid against the body profile cross-section and flags panels that are inside the body or on the wrong Z side.
+
+**Near-term — Sleeve placement fix:**
+- Verify that `their_torso_verts` in the centroid alignment loop correctly selects armhole-ring vertices (stitch partners on the torso), not the full torso vert set
+- The arm cylinder center for each sleeve is NOT at the torso body center (X=0) but at X = ±armhole_x ≈ ±0.12m. After XY alignment to the torso armhole centroid, the sleeve should be at the correct arm position.
+- If sleeves are still on wrong sides, investigate whether the GarmentCode `rotation` in `shirt_mean.json` (±50.48° Z-rotation) affects which side of the seam matches which panel.
+
+**Near-term — Side-seam vertex placement:**
+- Consider placing side-seam vertices (`|sin_t| > 1`) at their respective body surface Z (z_back or z_front) with a check that the resulting gap is < 30cm so sew constraints can close it. If the gap exceeds 30cm, fall back to Z=center_z.
+
+**Medium-term — Visualization improvements:**
+- Frontend: add per-phase GLB selector (initial placement, sew phase checkpoints, final drape)
+- Add panel labels overlay in viewer so panels can be identified visually
+
+---
+
 ### 📅 April 20, 2026: Phase 7 + 7b — Sew-Phase Explosion Fully Resolved
 
 **Status:** ✅ Complete — 18/18 seams close, no explosion, 213 tests pass
