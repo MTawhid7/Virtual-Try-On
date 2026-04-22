@@ -95,12 +95,15 @@ def _build_stitch_ribbon_mesh(
 
 
 def run_debug(
-    pattern_path: str = "data/patterns/garmentcode/shirt_mean.json",
+    pattern_path: str,
     mesh_resolution: float = 1.5,
     body_z_offset: float = 0.131,
+    scale_x: float = 1.0,
+    scale_y: float = 1.0,
     output_path: str = "storage/debug_gc_panels.glb",
     include_body: bool = True,
     include_stitches: bool = True,
+    include_prewrap: bool = False,
 ) -> None:
     import numpy as np
     import trimesh
@@ -113,7 +116,22 @@ def run_debug(
         pattern_path,
         mesh_resolution=mesh_resolution,
         body_z_offset=body_z_offset,
+        scale_x=scale_x,
+        scale_y=scale_y,
     )
+
+    if include_prewrap:
+        from simulation.mesh.gc_mesh_adapter import (
+            calibrate_garment_y,
+            prewrap_panels_to_body,
+            resolve_initial_penetrations,
+        )
+        calibrate_garment_y(gm, "data/bodies/mannequin_profile.json")
+        prewrap_panels_to_body(gm, clearance=0.008)
+        n_corr = resolve_initial_penetrations(gm, clearance=0.008)
+        print(f"  Prewrap applied — {n_corr} penetration corrections")
+        if output_path == "storage/debug_gc_panels.glb":
+            output_path = "storage/debug_gc_panels_wrapped.glb"
 
     n = gm.positions.shape[0]
     offsets = gm.panel_offsets + [n]
@@ -223,6 +241,14 @@ def main() -> None:
         help="Mesh resolution in cm (default: 1.5)",
     )
     parser.add_argument(
+        "--scale-x", type=float, default=1.0, dest="scale_x",
+        help="Width scaling factor for 2D patterns (default: 1.0)",
+    )
+    parser.add_argument(
+        "--scale-y", type=float, default=1.0, dest="scale_y",
+        help="Height scaling factor for 2D patterns (default: 1.0)",
+    )
+    parser.add_argument(
         "--output", default="storage/debug_gc_panels.glb",
         help="Output GLB path",
     )
@@ -234,15 +260,23 @@ def main() -> None:
         "--no-stitches", action="store_true",
         help="Omit stitch ribbon geometry from the output",
     )
+    parser.add_argument(
+        "--prewrap", action="store_true",
+        help="Apply calibrate_garment_y + prewrap_panels_to_body before export "
+             "(output: debug_gc_panels_wrapped.glb)",
+    )
     args = parser.parse_args()
 
     run_debug(
         pattern_path=args.pattern,
         mesh_resolution=args.res,
         body_z_offset=args.z_offset,
+        scale_x=args.scale_x,
+        scale_y=args.scale_y,
         output_path=args.output,
         include_body=not args.no_body,
         include_stitches=not args.no_stitches,
+        include_prewrap=args.prewrap,
     )
 
 

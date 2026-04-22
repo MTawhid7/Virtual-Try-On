@@ -167,37 +167,30 @@ Garment panels must start **outside** these bounds AND be **wide enough** for se
 
 ## Current State
 
-**April 21, 2026: Phase 7c — Sleeve Z Preservation (In Progress)**
+**April 22, 2026: Phase 8 — CLO3D-Style Panel Placement (Sleeve Wrapping Implemented)**
 
-Solver stability is complete (18/18 seams close, no explosion). Current focus is **visual panel placement quality**. The simulation runs correctly but the output does not yet look garment-like.
+Solver stability is complete (18/18 seams close, no explosion, 216 tests pass). Smooth torso shielding and true cylindrical sleeve wrapping are implemented.
 
-**Completed (Phases 7, 7b, 7c):**
-- **Attachment constraints** (`simulation/constraints/attachment.py`): Soft XPBD positional pins (compliance 1e-4) anchoring non-stitch torso vertices during sew phase only.
-- **`prewrap_panels_to_body()`** (three-stage):
-  1. *Torso panels*: Z-project each vertex to body ellipse surface at `clearance` distance.
-  2. *Sleeve/collar panels*: XY-only centroid alignment to torso armhole (`delta[2] = 0.0` for sleeve panels — preserves GarmentCode's intentional Z placement).
-  3. `resolve_initial_penetrations()`: Post-prewrap safety pass pushing inside-body vertices to clearance outside nearest surface.
-- **`calibrate_garment_y()`**: Shifts all garment vertices in Y so the topmost vertex aligns to `profile.neck_y`.
-- **`sew_initial_compliance = 1.0`**: Prevents sew-phase explosion (α̃ >> 2w).
-- **Velocity reset** at `frame == sew_end`: Prevents sew momentum from corrupting drape-phase.
+**Completed (Phases 7, 7b, 7c, 8):**
+- **Dynamic Pattern Scaling**: Added `scale_x/y` to `gc_mesh_adapter.py`.
+- **Attachment constraints** (`simulation/constraints/attachment.py`): Soft XPBD positional pins anchoring non-stitch torso vertices during sew phase only.
+- **`prewrap_panels_to_body()`** (two-pass):
+  1. *Torso panels (Pass 1)*: Smooth cosine-shield projection using body semi-axes. Eliminates boundary staircase artifacts and provides continuous C1 curvature. Default clearance 40mm.
+  2. *Sleeve panels (Pass 2)*: Direct 2D-to-3D cylindrical mapping. 2D panel Y-axis maps to arm length; 2D X-axis maps to cylinder angle θ. Produces true tubular sleeves and collapses initial gaps.
+  3. `resolve_initial_penetrations()`: Post-prewrap safety pass.
+- **`--prewrap` flag added to `debug_gc_panel_placement.py`**: Generates `storage/debug_gc_panels_wrapped.glb` for visual inspection of post-prewrap state.
 - **216 tests, 0 failures.**
 
-**Known visual placement issues (active work):**
-1. **Sleeve panels flat and potentially misaligned**: Sleeves are flat sheets (GarmentCode places them at constant Z, one side per panel). After XY centroid alignment to the torso armhole, they should be at the correct arm location, but visually they appear as flat diamonds at the shoulders rather than wrapping the arm cylinder.
-2. **Torso side edges appear "sealed"**: Side-seam vertices with `|sin_t| > 1` are placed at `Z = center_z` (body interior depth). Both front and back panel side edges land at the same Z, making them appear fused rather than naturally conforming. The side-seam gap metric reads 0cm (correct mechanically) but the visual shape is wrong.
-3. **Drape animation retains sew-phase shape**: The cloth shows minimal gravity-driven relaxation in the drape phase, suggesting internal stresses from the placement are too large for the drape phase to resolve.
+**Confirmed facts about current state:**
+- Torso wrapping and sleeve cylindrical wrapping are working.
+- Initial stitch gaps reduced from 30cm+ to < 5cm for most seams.
+- All 18 seams close to < 2cm in under 60 frames.
 
-**Key principle (learned from investigation):**
-- Unit test passage and gap closure metrics are necessary but not sufficient. Visual correctness against a reference (CLO3D T-shirt screenshot) is the primary validation gate for placement work.
-- GarmentCode's Z placement for sleeves (`sleeve_f` at Z≈0.306m, `sleeve_b` at Z≈0.006m) is intentional and should be preserved. Full-XYZ centroid alignment destroys it.
-- The centroid alignment reference point is the torso armhole ring vertices (stitch partners on the torso panel), not the full torso vert set.
-
-**Next tasks:**
-1. Build a per-panel color-coded diagnostic GLB (extend `scripts/debug_gc_panel_placement.py`) to visually verify which panels are where before any simulation
-2. Verify armhole centroid calculation: `their_torso_verts` in Pass 2 must select only the torso stitch partners at the armhole boundary
-3. Address sleeve flatness: arm cylinder wrapping (surface projection around the arm axis)
-4. Address side-seam edge placement: consider placing `|sin_t| > 1` vertices at body surface Z rather than center_z when the resulting gap is within sew-closable range (~30cm)
-5. **Phase 5 — FastAPI layer**: `POST /api/simulate` endpoint
+**Next tasks — Refining Placement:**
+1. **Increase Torso Clearance**: 40mm is still slightly too close at the chest (causing puffing); consider 50-60mm or adaptive clearance.
+2. **Reduce Panel Overlap**: Adjust scaling or placement to prevent torso panels from overlapping arms.
+3. **Smooth Sleeve Wrapping**: Fix the awkward placement of one sleeve element near the bottom of the arm and improve surface smoothness.
+4. **Phase 5 — FastAPI layer**: `POST /api/simulate` endpoint.
 
 **Performance note:** `body_drape` at 60×60 × 16 iterations + self-collision hash rebuild is intentionally slow — performance optimization is deferred. Do not optimize before Sprint 3.
 

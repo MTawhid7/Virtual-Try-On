@@ -63,6 +63,7 @@ class GarmentMesh:
     panel_ids: list[str]                 # panel id strings in order
     fabric: str                          # fabric name from pattern JSON
     stitch_seam_ids: list[str] | None = None  # one seam label per stitch pair (from JSON comment)
+    verts_2d: NDArray[np.float32] | None = None  # (N_total, 2) unrotated 2D panel coordinates
 
 
 def _rotation_x(deg: float) -> NDArray[np.float64]:

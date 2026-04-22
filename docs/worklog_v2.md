@@ -542,3 +542,301 @@ Fix path: Either (a) increase `gc_body_z_offset` or add a Y offset to GC panels 
 3. **Phase 5 — FastAPI layer**: `POST /api/simulate` endpoint; mount `backend/storage/` as static; frontend proxy.
 
 4. **T1.1 Seam welding** (roadmap Tier 1): After sew phase, merge vertex pairs with gap < 2mm. Eliminates residual seam lines in the rendered output.
+
+---
+
+### 📅 April 21, 2026: Geometric Refinement & Size Scaling
+
+**Status:** 🔶 Scaling ✅; Curvature ❌
+**Focus:** transitioning from flat 2D panel placement to a 3D parametric arrangement system. Correcting vertical scale (shoulder-to-hip) and implementing arc-length preserving wrapping math for torso and sleeves.
+
+#### Work Completed
+
+**1. Multi-dimensional Pattern Scaling**
+- Implemented `scale_x` and `scale_y` capabilities in `gc_mesh_adapter.py`.
+- Vertices are shifted from the panel's 2D centroid before 3D lifting, effectively allowing for "t-shirt length" (1.4y) and "standard width" (1.1x) garments from the same base `shirt_mean.json` spec.
+- Verified: Garment now correctly spans from the shoulder line down to the hip region, resolving the "crop top" artifact.
+
+**2. Arc-Length Preserving Curvature (failed intent)**
+- Replaced the parabolic Z-drop with a trigonometric arc-length projection: `theta = dx / R`.
+- Attempted to curl the flat width into a cylindrical "shield" that maintains the physical fabric width across its curve.
+- Implemented PCA-based cylindrical wrapping for arm sleeves to form 3D tubes instead of flat diamonds.
+
+#### Current State
+- **Scaling is confirmed:** The panels are now the correct physical size for a standard t-shirt.
+- **Curvature is missing:** Despite the added math, visual output (debug GLBs) still shows flat panels with minimal to no volume. 
+- **Z-Clearance Issue:** Panels are currently in the correct general XY position but are too far away from the body surface (~10cm), resulting in very long initial stitch gaps.
+
+#### Insights Gained
+1. **Trigonometric Scale Sensitivity:** The arrangement radius `R` (derived as body_width * 1.5) may be too conservative. For narrow patterns, the resulting angular sweep `theta` is small enough that the Z-drop remains beneath the visual detection threshold or gets buried by the mesh resolution.
+2. **Triangulation Constraints:** Scaling the 2D panel *before* triangulation is stable, but lifting it into a curve *after* triangulation requires more aggressive displacement to "fight" the flat rest-pose of the initial triangulated sheet.
+3. **SVD for Sleeves:** Using PCA to find the longitudinal/lateral axes of a rotated sleeve is mathematically sound, but the "curl direction" (mapping theta to a normal axis) is sensitive to the winding order and panel flipping convention of GarmentCode.
+
+#### Future Plan
+1. **Aggressive Geometric Shaping:** Move from "arc-length preservation" to "volumetric fitting." We need to shape the starting pose more aggressively to mimic the CLO3D "Arrangement Point" behavior.
+2. **Clearance Reduction:** Decrease the default `clearance` and radius `R` to pull the panels closer to the skin, which will improve the stability of the sew phase.
+3. **Verification of Projection Math:** Re-audit the vertex-lifting loop in `prewrap_panels_to_body` to ensure the displaced `X` and `Z` are correctly propagated back into the global `garment.positions` array and not being overwritten by legacy centroid alignment logic.
+
+---
+
+### 📅 April 22, 2026: Phase 8 — CLO3D-Style Panel Placement (Elliptical Wrap + Arm Rotation)
+
+**Status:** 🔶 Torso wrapping ✅; Sleeve curvature ❌ — flat panels remain
+**Focus:** Replace the circular-radius torso wrap and Z-frozen sleeve alignment with a CLO3D-like approach: true elliptical body-surface projection for torso panels, arm-direction rotation for sleeve panels.
+
+#### Work Completed
+
+**1. True elliptical torso wrap (`gc_mesh_adapter.py` Pass 1)**
+
+Replaced the old single-radius circular projection (`R = 1.5 × half_width = 0.263m`) with the body's actual elliptical cross-section semi-axes:
+- `a = sl.width / 2` (X half-axis, body half-width)
+- `b = sl.depth / 2 + clearance` (Z half-axis, body depth + clearance)
+- For each vertex: `theta = arcsin(dx / a)` if `|dx/a| ≤ 1`, then `pos[vi, 0] = cx + a·sin(θ)` and `pos[vi, 2] = cz ± b·cos(θ)` (± for back/front)
+- Vertices with `|dx/a| > 1` (outside body half-width) are left at their GarmentCode Z and handled by `resolve_initial_penetrations()`
+
+**2. Sleeve centroid alignment — Z-freeze removed (`gc_mesh_adapter.py` Pass 2)**
+
+Removed the previous `delta[2] = 0.0` Z-freeze that preserved GarmentCode's intentional sleeve Z. Instead, full XYZ centroid alignment uses the torso armhole ring as reference after Pass 1. The stitch-connectivity guarantee ensures `their_torso_verts` contains only the correct front-or-back torso armhole ring — so Z naturally lands near the correct body side.
+
+**3. Arm-direction rotation added (`_rotation_from_axes()` helper)**
+
+After centroid translation, each sleeve panel is rotated using:
+1. SVD on the sleeve vertex cloud to find the principal axis
+2. Rodrigues rotation mapping that axis → `[±1, 0, 0]` (T-pose arm direction)
+
+**4. `--prewrap` flag added to `debug_gc_panel_placement.py`**
+
+The debug script now accepts `--prewrap` to generate `storage/debug_gc_panels_wrapped.glb` showing post-prewrap panel positions for visual inspection. Both pre- and post-prewrap states can be compared side by side.
+
+#### Confirmed Results (from diagnostic traces)
+
+**Torso wrapping — working correctly:**
+
+| Panel | Pre-prewrap Z | Post-prewrap Z | Z range |
+|-------|--------------|----------------|---------|
+| right_btorso | −0.069m (flat) | [−0.069, +0.161]m | 230mm ✅ |
+| right_ftorso | +0.381m (flat) | [+0.157, +0.381]m | 224mm ✅ |
+
+The Z variation confirms elliptical curvature. Center vertices land at the body apex (cz ± b); side vertices converge toward cz. The −0.069m vertices are outside body half-width and were left unwrapped (correct — resolve_initial_penetrations pushes any inside-body ones out).
+
+**Sleeve alignment — centroid correct, surface still flat:**
+
+| Panel | Pre-prewrap Z | Post-prewrap Z | ref_centroid Z | delta_z |
+|-------|--------------|----------------|----------------|---------|
+| right_sleeve_b | +0.006m (flat) | +0.047m (flat) | +0.047m (15 btorso verts) | +0.041m |
+| right_sleeve_f | +0.306m (flat) | +0.300m (flat) | +0.300m (13 ftorso verts) | −0.006m |
+
+Centroid alignment is correct: sleeve_b moves to the btorso armhole centroid (Z≈0.047m, near back body surface); sleeve_f stays near the ftorso armhole centroid (Z≈0.300m, near front body surface). However, both sleeves remain perfectly flat (1 unique Z value each).
+
+**Penetration corrections:** 342 vertices corrected by `resolve_initial_penetrations()`.
+
+**Stitch gaps after prewrap:**
+
+| Seam | Gap range | dZ range |
+|------|-----------|----------|
+| sleeve ↔ torso | 9–25cm | up to ±25cm |
+| torso side seams | 0–45cm | up to ±45cm |
+
+#### Root Cause: Why Sleeves Cannot Be Curved by Rotation
+
+This is a mathematical fact, not an implementation bug.
+
+GarmentCode outputs all panels as **perfectly flat** (Z=constant for all vertices). For a Z=constant panel:
+- `centered[:, 2] = 0` (all Z deviations from centroid are zero)
+- SVD's first principal axis lies entirely within the XY plane
+- Rodrigues rotation from an XY-plane axis to `[±1, 0, 0]` is a **pure Z-axis rotation**
+- After applying `pos = pivot + centered @ R_mat.T`, the new Z values equal `pivot_z + centered[:, 0]·R[2,0] + centered[:, 1]·R[2,1]`
+- For a Z-axis rotation: `R[2, 0] = 0` and `R[2, 1] = 0`, so **new Z = pivot_z** (unchanged for all vertices)
+
+Rotation of a flat panel within its own plane cannot introduce Z curvature. Z variation must be **explicitly computed and written** from body surface geometry — it cannot be derived from orientation changes.
+
+This same constraint applies to any future rotation-based approach: until the sleeve vertices have non-zero Z spread relative to their centroid, no 3×3 rotation will produce a curved sleeve.
+
+#### Visual Evidence (Screenshots)
+
+The debug GLB (`storage/debug_gc_panels_wrapped.glb`) confirms:
+- **Front view**: Torso panels (yellow/teal) show body-conforming curvature. Sleeve panels (green) are flat horizontal sheets extending from the shoulder.
+- **Back view**: Back torso panels (blue/orange) show curvature. Back sleeve panels (pink) are flat horizontal sheets extending from the shoulder with incorrect upward rotation.
+- The arm rotation step rotated the sleeves to extend horizontally (±X), which is correct orientation, but they remain flat discs rather than tubular wraps.
+- Stitch ribbons (magenta) are 10–25cm long, confirming large initial gaps.
+
+#### Issues Encountered
+
+1. **Arm rotation reintroduced previous artifact.** The sleeve panels now extend horizontally from the shoulder at the correct arm angle (±X), but the flat-disc geometry makes them look like wings rather than sleeve tubes. The previous `delta[2] = 0.0` approach at least preserved a visually harmless (if incorrect) flat panel near each body surface.
+
+2. **Stitch gaps are still large.** The sleeve-to-torso stitch gaps are 9–25cm. These are within what the sew solver can close (previous tests showed 18/18 seams close), but the large initial gap creates retained stress in the drape phase.
+
+3. **Torso side vertices at unwrapped Z.** Vertices with `|dx/a| > 1` remain at GarmentCode Z (0.381m for ftorso, −0.069m for btorso). These are the panel edges beyond the body's half-width and create a visual artifact where the torso panel boundary appears to float.
+
+#### Key Insights
+
+1. **CLO3D's arrangement is surface projection, not rotation.** CLO3D places panels by projecting each vertex onto a reference surface (cylinder, cone, or spline-swept surface) that approximates the target body region. For the torso it is the body ellipse (now implemented ✅). For the sleeve it is a cylinder centered on the arm axis. The curved shape emerges from the geometry of the projection surface, not from rotating a flat panel.
+
+2. **The flat-panel constraint is fundamental to GarmentCode output.** GarmentCode lifts 2D patterns to 3D via `rot_trans_panel()`, which applies rigid rotation + translation. A rigid transform of a flat 2D polygon always produces a flat 3D polygon (Z=constant in some plane). Any curvature must be injected AFTER this lift by surface projection.
+
+3. **Two of three sub-problems are solved:**
+   - Torso elliptical projection: ✅ Implemented and confirmed working (230mm Z variation)
+   - Sleeve centroid alignment to torso armhole ring: ✅ Implemented and confirmed (sleeve_b → btorso, sleeve_f → ftorso)
+   - Sleeve arm-cylinder projection: ❌ Not yet implemented
+
+4. **`their_torso_verts` correctly selects the right body side.** Stitch connectivity ensures: `right_sleeve_f` → 13 ftorso verts (front body), `right_sleeve_b` → 15 btorso + 2 ftorso verts (back body). The Z-freeze removal is safe.
+
+5. **Visual correctness is the only valid gate for placement work.** The 216 unit tests pass and 18/18 seams close regardless of whether sleeves are flat or curved — the XPBD solver is robust enough to handle 10–25cm gaps. But the visual output and the retained stress in the drape phase are the true quality indicators.
+
+#### Plan Moving Forward
+
+**The correct next step is arm-cylinder projection for sleeve panels**, analogous to the torso elliptical projection.
+
+Required information (must be measured, not guessed):
+1. **Sleeve panel 2D layout**: Which dimension of the GarmentCode sleeve panel maps along the arm (X-direction in T-pose) and which maps around the arm circumference? This determines how `panel_height` maps to `arm_length_position` and how `panel_width` maps to `wrap_angle`.
+
+2. **Arm cylinder geometry**: The arm in a T-pose is approximately cylindrical with:
+   - Axis direction: ±[1, 0, 0]
+   - Axis position: near shoulder joint (X = ±0.17–0.22m, Y = shoulder_y ≈ 1.43m, Z = armhole_centroid_z ≈ 0.10–0.15m depending on side)
+   - Cylinder radius ≈ arm circumference / (2π) ≈ 8–10cm
+
+3. **Panel-to-cylinder axis mapping**: GarmentCode places sleeves with a ~50° Z-rotation. After `rot_trans_panel()`, which direction in the sleeve panel's 3D vertex cloud aligns with the arm axis?
+
+Verification approach before implementation:
+- Print the 2D bounding box of the sleeve panel from GarmentCode's 2D coordinates
+- Print the 3D vertex cloud extent of the sleeve panel in each axis (X, Y, Z) from GarmentCode's `rot_trans_panel()` output
+- Compare to determine: sleeve `panel_height` → arm longitudinal axis, sleeve `panel_width` → arm circumference direction
+- Only then implement the cylinder projection
+
+**Implementation sketch (after verification):**
+
+```python
+# For each sleeve vertex vi:
+#   1. Determine arm axis center (shoulder_x, shoulder_y, armhole_z) from body profile
+#   2. Project vertex onto plane perpendicular to arm axis → get angle theta around arm
+#   3. Map theta to cylinder surface: pos[vi, Z] = armhole_z + arm_radius * sin(theta)
+#                                     pos[vi, Y] = shoulder_y + arm_radius * cos(theta)
+#   4. pos[vi, X] stays (it encodes position along arm length)
+```
+
+This projection is geometrically analogous to the torso ellipse projection and will produce true Z variation in sleeve panels.
+
+---
+
+### 📅 April 22, 2026: Phase 8b — Arm Cylinder Projection & Torso Smooth Wrap (Investigation)
+
+**Status:** 🔶 Partially Implemented — architectural improvements in place, visual output not yet production-quality  
+**Focus:** Implementing CLO3D-style panel placement with three improvements: smooth torso wrap, arm-cylinder projection for sleeves, and side-edge boundary blending.
+
+#### Work Completed
+
+**1. Codebase Analysis & Measurement**
+
+Performed thorough geometric analysis of the panel-to-body relationship before any code changes:
+
+- **GarmentCode sleeve panels**: 2D size 31.2 × 21.3 cm. After `rot_trans_panel()` with 50° Z-rotation, the 2D X direction (arm circumference) maps to 3D diagonal `[0.636, 0.771, 0.0]`, and 2D Y (arm length) maps to `[-0.771, 0.636, 0.0]`. All sleeve vertices have **constant Z** (e.g., Z=0.306m for `right_sleeve_f`). The SVD principal axis is `[0.43, 0.90, 0.0]` (arm-length direction).
+
+- **Arm cylinder geometry** (measured from `mannequin_physics.glb` vertex rings):
+  | X position | Arm center Y | Arm center Z | Radius |
+  |-----------|-------------|-------------|--------|
+  | ±0.20 (shoulder) | 1.333 | 0.134 | 0.072m |
+  | ±0.29 | 1.170 | 0.130 | 0.073m |
+  | ±0.35 | 1.125 | 0.124 | 0.069m |
+  | ±0.41 (lower arm) | 0.992 | 0.146 | 0.042m |
+
+  The arm slopes downward (center Y drops ~0.34 per 0.21m of X travel) and tapers (radius 0.072 → 0.042m from shoulder to wrist).
+
+- **Stitch topology**: `sleeve_f ↔ sleeve_b` has 39 underarm seam pairs (longest seam); `sleeve_f ↔ ftorso` has 17 armhole cap pairs; `sleeve_b ↔ btorso` has 19 pairs.
+
+**2. Architectural Improvements to `gc_mesh_adapter.py`**
+
+- **Piecewise arm cylinder model** (`_build_arm_centerline()`, `_arm_at_x()`): Queries the body mesh directly to extract arm cross-sections at 12 slices along the X axis. Returns interpolatable centerline data (center_y, center_z, radius at each X position). This replaces the previous assumption of a single fixed cylinder.
+
+- **Panel role classification with fallback** (`_classify_panel()`): Primary classification by panel name keywords (`btorso`, `ftorso`, `sleeve`). Fallback: if >30% of a panel's cross-panel stitches connect to torso-classified panels, classify as `sleeve`. This handles future GarmentCode patterns that may use non-standard naming.
+
+- **Configurable clearance constants**: `_TORSO_CLEARANCE` (25mm) and `_SLEEVE_CLEARANCE` (5mm) defined as module-level constants for future configurability.
+
+**3. Torso Wrap — Smooth Reference Ellipse**
+
+Replaced the per-vertex body profile lookup with a **single reference ellipse per panel**, computed from the panel's median-Y cross-section. This eliminates the terrain-like artifacts caused by the body profile's varying cross-sections at each vertex height.
+
+- Before: each vertex queried `profile.at_y(py)` independently, creating ridged surfaces where the body profile had abrupt width/depth transitions (especially around armpit/shoulder Y levels).
+- After: all vertices in a panel use the same `(a, b, cx, cz)` ellipse, producing uniform cylindrical curvature.
+- Side-edge blending added for vertices with `|dx/a| > 1.0`: Z smoothly converges toward body center-Z instead of staying at flat GarmentCode Z.
+
+**4. Arm Cylinder Projection — Two Approaches Attempted**
+
+**Attempt 1: SVD wrap_coords approach**
+- Projected each vertex onto the SVD secondary axis to get a "wrap coordinate", then mapped that to θ on the arm cylinder.
+- **Result**: Severe accordion/fan distortion (horizontal striping). Root cause: the wrap coordinate from SVD mixes with world-space coordinates when replacing Y — vertices at the same SVD-wrap value but different X positions get mapped to different arm-center Y values, creating non-smooth surfaces.
+
+**Attempt 2: Rotate-then-project approach**
+- First rotated the panel so the SVD primary axis aligns with the arm direction (±X), then used the Y offset from the arm center at each X position to compute the cylinder angle θ.
+- **Result**: Sleeves split into two fragments — one portion projected correctly near the arm, while the other remained positioned near the torso front. Root cause: after SVD rotation + centroid translation, the pivot point (armhole stitch centroid) is between the torso surface and the arm, causing the rotation to swing some vertices behind the torso while projecting others outward.
+
+#### Issues Identified (Open)
+
+1. **Sleeve centroid-then-rotate creates split geometry**: The two-step process (translate to armhole centroid → rotate to align with X → project onto cylinder) is fundamentally fragile because the armhole centroid is a point between the torso surface and the arm, not on the arm itself. The rotation around this midpoint sends some vertices toward the body interior and others outward.
+
+2. **Torso panels still too close to body**: Even at 25mm clearance, the body mesh surface pokes through at anatomical high points (chest/nipple area). The single-reference-ellipse approach helps with terrain artifacts but doesn't prevent localized penetrations where the body surface is convex beyond the reference ellipse.
+
+3. **Side-edge staircase effect**: The transition from elliptical wrap (`|t| ≤ 1`) to side-edge blending (`|t| > 1`) creates an abrupt directional change. The vertices at the body edge (|t| = 1) have near-vertical Z gradient, but the blending region converges toward body center-Z — creating a visible "staircase" at the boundary.
+
+4. **Arm cylinder model limitations**: The piecewise model works well for the upper arm but degenerates near X=±0.20 (shoulder joint, where arm vertices overlap with torso vertices) and at X=±0.44+ (wrist, where very few mesh vertices exist).
+
+#### Key Insights
+
+1. **Rotation cannot introduce curvature in a flat panel** — this was re-confirmed empirically. The SVD rotation (Rodrigues formula) aligns the panel's principal axis with the arm direction but preserves the Z=constant constraint. Z curvature must be explicitly computed from surface geometry.
+
+2. **The sleeve placement problem is harder than torso placement.** Torso panels have a clear 1D mapping (X position → ellipse angle θ → Z curvature). Sleeves require a 2D decomposition: separating the arm-length coordinate from the circumferential coordinate in a panel that's rotated 50° from axis-aligned. The GarmentCode rotation mixes both dimensions into XY, making it impossible to use raw world coordinates for the projection.
+
+3. **CLO3D uses a fundamentally different approach.** CLO3D's "Arrangement Points" system anchors panels to specific body surface locations, then wraps them by projecting onto a reference surface defined by those anchor points. This is a marker-driven approach, not a geometry-driven one. Our system lacks body-surface anchor points, so we must infer the projection geometry from the body mesh and stitch connectivity.
+
+4. **The correct approach for sleeves likely requires working in 2D panel coordinates**, not 3D post-rotation coordinates. The 2D panel has clean, separated dimensions: 2D-X = arm circumference, 2D-Y = arm length. Mapping these directly onto the arm cylinder (2D-Y → position along arm axis, 2D-X → angle θ around arm) would bypass all rotation-mixing issues. This requires storing or recovering the 2D coordinates during `prewrap_panels_to_body()`.
+
+5. **Torso wrap quality depends on clearance AND reference surface smoothness.** Per-vertex body profile lookup creates terrain artifacts because the body profile has ~56 cross-sections with varying parameters. A smooth reference surface (single ellipse or low-frequency spline) is essential for CLO3D-like visual quality. The 25mm clearance helps but is not sufficient — the reference surface shape matters more than the offset distance.
+
+#### Plan Moving Forward
+
+**Immediate next steps (next session):**
+
+1. **Sleeve projection from 2D coordinates**: Instead of projecting from 3D post-rotation space, map the 2D panel coordinates directly onto the arm cylinder:
+   - Store 2D panel vertex coordinates in `GarmentMesh` (or recover them from the rotation inverse)
+   - 2D-Y → arm-length position (determines world X along arm axis)
+   - 2D-X → circumferential angle θ (determines world Y/Z on cylinder surface)
+   - Arm cylinder center and radius queried from the piecewise model at each arm-length position
+
+2. **Torso wrap smoothing**: Replace the single-reference-ellipse approach with a 3-keyframe spline (top, middle, bottom of panel) to follow the body's natural taper while maintaining smooth curvature. Increase clearance further (30-35mm) or use adaptive clearance based on local body surface curvature.
+
+3. **Side-edge continuity**: Replace the linear blending with cosine interpolation to eliminate the staircase effect at |t| = 1:
+   ```python
+   blend = 0.5 * (1 - cos(π * (t_abs - 1.0) / 0.5))  # smooth S-curve
+   ```
+
+### 📅 April 22, 2026 (continued): Phase 8 — Smooth Shielding & 2D-to-3D Sleeve Projection
+
+**Status:** ✅ Implementation Complete; 🔶 Aesthetic Refinement Pending
+**Focus:** Resolving visual discontinuities in torso wrapping and implementing true 3D cylindrical sleeves by mapping directly from 2D coordinates.
+
+#### Work Completed
+
+**1. Smooth Cosine Shield for Torso**
+- Replaced the branching `arcsin` elliptical projection with a continuous **cosine-based shield function**.
+- Extended the mapping range to `1.25 * body_half_width` to ensure the Z-curvature drop-off is smooth even past the torso edge.
+- **Result:** Successfully eliminated the "staircase" artifact at the panel boundaries. The torso now exhibits a premium, continuous shield-like form.
+
+**2. Direct 2D-to-3D Sleeve Mapping**
+- Implemented a new coordinate mapping pipeline that utilizes the original **unrotated 2D panel vertices**.
+- **Math:** 2D-Y maps to arm length (world X), while 2D-X maps to the wrap angle θ on the arm cylinder.
+- **Result:** Sleeves are now correctly formed as 3D tubes. They no longer sit in front of the chest or exhibit extreme stretch. They naturally wrap the arms, significantly reducing the initial gap to the torso armholes.
+
+**3. Data Persistence**
+- Updated the `GarmentMesh` dataclass and the `gc_mesh_adapter.py` loader to preserve `verts_2d`. This architectural change was essential to drive the 2D-to-3D projection without coordinate mixing from legacy rotations.
+
+#### Issues Encountered & Observations
+
+- **Torso Proximity:** At the current 40mm clearance, the torso panel sits too close to the mannequin's chest, leading to localized "puffing" artifacts in the simulation.
+- **Panel Sizing:** Torso panels are slightly too wide, overlapping the arms in the initial pre-wrap state.
+- **Sleeve Surface Quality:** While the tube structure is correct, the surface smoothness needs refinement. One element in each sleeve pair tends to sit awkwardly near the bottom of the arm cylinder.
+- **Simulation Stability:** Seam closure is now extremely robust, with all 18 seams closing to < 2cm mean gaps within 60 frames.
+
+#### Future Plan (Next Session)
+
+1. **Adaptive Clearance & Scaling**: Increase torso clearance to ~50-60mm and adjust panel scaling/positioning to prevent arm overlap.
+2. **Sleeve Wrap Refinement**: Fine-tune the 2D-X to θ mapping to ensure smoother sleeve surfaces and more symmetric placement around the arm axis.
+3. **Phase 5 (FastAPI Layer)**: Begin exposing the simulation via the web API now that the 3D initial state is visually stable.

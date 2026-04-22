@@ -142,8 +142,8 @@ def run_garment_drape(
     # GC path: calibrate vertical placement then 3D-prewrap panels onto body surface.
     if gc_pattern:
         calibrate_garment_y(garment, "data/bodies/mannequin_profile.json")
-        prewrap_panels_to_body(garment, clearance=0.008)
-        n_corr = resolve_initial_penetrations(garment, clearance=0.008)
+        prewrap_panels_to_body(garment, body_mesh_path=_BODY_GLB_PATH)
+        n_corr = resolve_initial_penetrations(garment, body_mesh_path=_BODY_GLB_PATH, clearance=0.008)
         if n_corr:
             print(f"  Penetration resolver: corrected {n_corr} inside-body vertices")
 

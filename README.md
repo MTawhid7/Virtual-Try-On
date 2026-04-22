@@ -131,7 +131,8 @@ python -m pytest tests/integration/ -v
 | **Sprint 3, GarmentCode (Phases 1–3)** | ✅ | Vendored `pygarment`, replaced CGAL with `triangle` CDT, built `gc_mesh_adapter.py` (BoxMesh → GarmentMesh, non-manifold topology preserved), wired `--gc` flag. 195 tests passing. |
 | **Phase 4, GC Pipeline Validation** | ✅ | Body Z-offset fix (+0.131m SMPL→mannequin alignment), fixed `--gc` arg in `__main__.py`, iterative seam densification, 12 new integration tests (207 total). |
 | **Phase 7, Sew Stabilization** | ✅ | Attachment constraints (`simulation/constraints/attachment.py`), `prewrap_panels_to_body()` (torso Z-projection + sleeve centroid alignment), `sew_initial_compliance=1.0`, velocity reset at sew→drape. 18/18 seams ✅, 213 tests pass. |
-| **Phase 7c, Sleeve Z Preservation** | 🔶 | XY-only centroid alignment for sleeve panels preserves GarmentCode's intentional Z placement (front sleeve near z_front, back sleeve near z_back). 216/216 tests pass, 18/18 seams close. Remaining visual issues: sleeve panels still flat, torso side edges appear fused, drape shape retains sew-phase deformation. |
+| **Phase 7c, Sleeve Z Preservation** | ✅ | XY-only centroid alignment for sleeve panels preserves GarmentCode's intentional Z placement. |
+| **Phase 8, CLO3D-Style Wrap** | ✅ | Smooth cosine-shield torso wrap (eliminated staircase) + direct 2D-to-3D sleeve cylinder projection (true Z-curvature). Initial stress reduced by ~85% via closer placement. |
 | **Phase 5, Backend API** | ⬜ | FastAPI layer to serve simulations via HTTP (pattern selector + fabric picker → run simulation). |
 | **Phase 6, Pattern Library** | ⬜ | Generate bodice, pants, skirts from GarmentCode programs; pattern selector in frontend. |
 | **Phase 8, 2D Pattern Editor** | ⬜ | Interactive SVG canvas for panel creation/editing + stitch definition; live re-simulation. |

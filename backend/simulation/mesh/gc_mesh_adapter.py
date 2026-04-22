@@ -62,6 +62,8 @@ def boxmesh_to_garment_mesh(
     cm_to_m: float = 0.01,
     fabric: str = "cotton",
     body_z_offset: float = 0.0,
+    scale_x: float = 1.0,
+    scale_y: float = 1.0,
 ) -> GarmentMesh:
     """
     Convert a loaded (but NOT collapsed) BoxMesh into a GarmentMesh.
@@ -101,6 +103,7 @@ def boxmesh_to_garment_mesh(
     all_faces: list[NDArray[np.int32]] = []
     all_edges: list[NDArray[np.int32]] = []
     all_uvs: list[NDArray[np.float32]] = []
+    all_verts_2d: list[NDArray[np.float32]] = []
     panel_offsets: list[int] = []
     panel_ids: list[str] = []
 
@@ -111,8 +114,15 @@ def boxmesh_to_garment_mesh(
         panel = bm.panels[panel_name]
 
         # --- 3D positions (cm → m) ---
-        # panel.panel_vertices are 2D, rot_trans_panel lifts to 3D
-        verts_3d = panel.rot_trans_panel(panel.panel_vertices)
+        # Scale 2D vertices from panel centroid before 3D rotation to preserve alignment
+        verts_2d = np.array(panel.panel_vertices, dtype=np.float64)
+        if scale_x != 1.0 or scale_y != 1.0:
+            c2d = verts_2d.mean(axis=0)
+            verts_2d[:, 0] = c2d[0] + (verts_2d[:, 0] - c2d[0]) * scale_x
+            verts_2d[:, 1] = c2d[1] + (verts_2d[:, 1] - c2d[1]) * scale_y
+
+        # rot_trans_panel lifts to 3D
+        verts_3d = panel.rot_trans_panel(verts_2d.tolist())
         verts_3d = np.array(verts_3d, dtype=np.float64) * cm_to_m
         positions = verts_3d.astype(np.float32)  # (N_panel, 3)
 
@@ -148,6 +158,7 @@ def boxmesh_to_garment_mesh(
         all_faces.append(faces_global)
         all_edges.append(edges_global)
         all_uvs.append(uvs)
+        all_verts_2d.append((verts_2d * cm_to_m).astype(np.float32))
         offset += len(positions)
 
     # --- Merge global arrays ---
@@ -155,6 +166,7 @@ def boxmesh_to_garment_mesh(
     faces_merged = np.concatenate(all_faces, axis=0).astype(np.int32)
     edges_merged = np.concatenate(all_edges, axis=0).astype(np.int32)
     uvs_merged = np.concatenate(all_uvs, axis=0).astype(np.float32)
+    verts_2d_merged = np.concatenate(all_verts_2d, axis=0).astype(np.float32)
 
     # --- Build stitch_pairs from BoxMesh stitch edge vertex_ranges ---
     # BoxMesh guarantees that stitch_range_1 and stitch_range_2 have the same
@@ -253,6 +265,7 @@ def boxmesh_to_garment_mesh(
         panel_ids=panel_ids,
         fabric=fabric,
         stitch_seam_ids=seam_ids if seam_ids else None,
+        verts_2d=verts_2d_merged,
     )
 
 
@@ -261,6 +274,8 @@ def build_garment_mesh_gc(
     mesh_resolution: float = 2.0,
     fabric: str = "cotton",
     body_z_offset: float = 0.0,
+    scale_x: float = 1.0,
+    scale_y: float = 1.0,
 ) -> GarmentMesh:
     """
     Build a GarmentMesh from a GarmentCode pattern specification JSON.
@@ -293,7 +308,9 @@ def build_garment_mesh_gc(
     bm = BoxMesh(str(path), res=mesh_resolution)
     bm.load()
 
-    return boxmesh_to_garment_mesh(bm, fabric=fabric, body_z_offset=body_z_offset)
+    return boxmesh_to_garment_mesh(
+        bm, fabric=fabric, body_z_offset=body_z_offset, scale_x=scale_x, scale_y=scale_y
+    )
 
 
 def build_gc_attachment_constraints(
@@ -399,30 +416,173 @@ def calibrate_garment_y(
     garment.positions[:, 1] += delta_y
 
 
+def _rotation_from_axes(src: np.ndarray, dst: np.ndarray) -> np.ndarray:
+    """3×3 rotation matrix mapping unit vector src → dst (Rodrigues' formula)."""
+    src = src / (np.linalg.norm(src) + 1e-12)
+    dst = dst / (np.linalg.norm(dst) + 1e-12)
+    if abs(np.dot(src, dst) + 1.0) < 1e-6:  # anti-parallel: rotate 180° around any perp axis
+        perp = np.array([1.0, 0.0, 0.0]) if abs(src[0]) < 0.9 else np.array([0.0, 1.0, 0.0])
+        v = np.cross(src, perp)
+        v /= np.linalg.norm(v)
+        return -np.eye(3) + 2.0 * np.outer(v, v)
+    v = np.cross(src, dst)
+    s = np.linalg.norm(v)
+    if s < 1e-8:
+        return np.eye(3)
+    c = float(np.dot(src, dst))
+    K = np.array([[0.0, -v[2], v[1]], [v[2], 0.0, -v[0]], [-v[1], v[0], 0.0]])
+    return np.eye(3) + K + K @ K * ((1.0 - c) / (s ** 2))
+
+
+# ---------------------------------------------------------------------------
+# Arm cylinder model — piecewise centerline from body mesh vertices
+# ---------------------------------------------------------------------------
+
+def _build_arm_centerline(
+    body_mesh_path: str,
+    x_sign: float,
+    x_min_abs: float = 0.20,
+    x_max_abs: float = 0.48,
+    n_slices: int = 12,
+    ring_hw: float = 0.025,
+) -> tuple[NDArray, NDArray, NDArray, NDArray]:
+    """Build piecewise arm cylinder from body mesh.
+
+    Returns (x_positions, center_y, center_z, radius) arrays sorted by X.
+    ``x_sign`` is -1 for right arm, +1 for left arm.
+    """
+    import trimesh
+    body = trimesh.load(body_mesh_path, force="mesh")
+    verts = np.array(body.vertices)
+
+    arm_mask = (verts[:, 0] * x_sign > x_min_abs) & (verts[:, 1] > 0.90)
+    arm_verts = verts[arm_mask]
+
+    xs, cys, czs, rs = [], [], [], []
+    for x_t in np.linspace(x_sign * x_min_abs, x_sign * x_max_abs, n_slices):
+        ring = arm_verts[(arm_verts[:, 0] > x_t - ring_hw) &
+                         (arm_verts[:, 0] < x_t + ring_hw)]
+        if len(ring) < 4:
+            continue
+        cy = float(ring[:, 1].mean())
+        cz = float(ring[:, 2].mean())
+        r = float(np.sqrt(np.mean((ring[:, 1] - cy) ** 2 + (ring[:, 2] - cz) ** 2)))
+        if r > 0.01:
+            xs.append(x_t); cys.append(cy); czs.append(cz); rs.append(r)
+
+    order = np.argsort(xs)
+    return (np.array(xs)[order], np.array(cys)[order],
+            np.array(czs)[order], np.array(rs)[order])
+
+
+def _arm_at_x(
+    arm: tuple[NDArray, NDArray, NDArray, NDArray],
+    x: float,
+) -> tuple[float, float, float]:
+    """Interpolate arm (center_y, center_z, radius) at X position."""
+    xs, cys, czs, rs = arm
+    if len(xs) < 2:
+        return float(cys[0]), float(czs[0]), float(rs[0])
+    idx = int(np.clip(np.searchsorted(xs, x) - 1, 0, len(xs) - 2))
+    denom = xs[idx + 1] - xs[idx]
+    t = float(np.clip((x - xs[idx]) / max(denom, 1e-8), 0.0, 1.0))
+    return (
+        float(cys[idx] + t * (cys[idx + 1] - cys[idx])),
+        float(czs[idx] + t * (czs[idx + 1] - czs[idx])),
+        float(rs[idx] + t * (rs[idx + 1] - rs[idx])),
+    )
+
+
+# ---------------------------------------------------------------------------
+# Panel role classification (name-based + stitch-connectivity fallback)
+# ---------------------------------------------------------------------------
+
+_BACK_KEYWORDS = ("btorso", "back")
+_FRONT_KEYWORDS = ("ftorso", "front")
+_TORSO_KEYWORDS = _BACK_KEYWORDS + _FRONT_KEYWORDS
+
+
+def _classify_panel(
+    pid: str,
+    panel_idx: int,
+    garment: "GarmentMesh",
+    offsets: list[int],
+    torso_vert_set: set[int],
+) -> str:
+    """Return 'torso_back', 'torso_front', 'sleeve', or 'other'."""
+    pid_lower = pid.lower()
+
+    # Primary: name-based
+    if any(kw in pid_lower for kw in _BACK_KEYWORDS):
+        return "torso_back"
+    if any(kw in pid_lower for kw in _FRONT_KEYWORDS):
+        return "torso_front"
+    if "sleeve" in pid_lower:
+        return "sleeve"
+
+    # Fallback: stitch connectivity — if >30% of cross-panel stitches
+    # connect to torso panels, classify as sleeve.
+    panel_set = set(range(offsets[panel_idx], offsets[panel_idx + 1]))
+    pairs = garment.stitch_pairs
+    torso_count = 0
+    total_cross = 0
+    for col, other_col in ((0, 1), (1, 0)):
+        mask = np.isin(pairs[:, col], list(panel_set))
+        if not np.any(mask):
+            continue
+        other = pairs[mask, other_col]
+        cross = ~np.isin(other, list(panel_set))
+        total_cross += int(cross.sum())
+        for ov in other[cross]:
+            if int(ov) in torso_vert_set:
+                torso_count += 1
+
+    if total_cross > 0 and torso_count / total_cross > 0.3:
+        return "sleeve"
+    return "other"
+
+
+# ---------------------------------------------------------------------------
+# Main pre-wrap function
+# ---------------------------------------------------------------------------
+
+# Default clearance values (designed for future configurability)
+_TORSO_CLEARANCE: float = 0.040  # 40mm — loose CLO3D-like gap, avoids body poke-through
+_SLEEVE_CLEARANCE: float = 0.005  # 5mm — arm is convex, less risk
+
+
 def prewrap_panels_to_body(
     garment: "GarmentMesh",
-    clearance: float = 0.008,
+    clearance: float = _TORSO_CLEARANCE,
+    body_mesh_path: str = "data/bodies/mannequin_physics.glb",
 ) -> None:
-    """
-    Place garment panels close to their initial simulation positions before simulation.
+    """Place garment panels close to the body surface for stable simulation.
 
-    Two operations:
-    1. Torso panels (front/back): 3D elliptical wrap using the body cross-section profile.
-       Each vertex is mapped onto the body's elliptical cross-section at its Y height at
-       clearance distance from the surface.  Front vertices land on the front hemisphere
-       (Z > center_Z), back vertices on the back hemisphere (Z < center_Z).  Both X and Z
-       coordinates are updated so the panel is naturally curved, matching the body shape
-       and eliminating the flat-panel waviness of a 1D Z-snap.
-    2. Sleeve/collar panels:
-       a. Translate so the stitch-vertex centroid aligns with the opposing armhole centroid.
-       b. Rotate around that centroid so the sleeve's armhole ring plane aligns with the
-          torso's armhole ring plane (SVD-based).  This orients the sleeve to wrap around
-          the arm rather than hanging flat in front of it.
+    Three-pass pipeline producing CLO3D-style smooth initial placement:
 
-    Call resolve_initial_penetrations() after this function to push out any vertices that
-    the wrap placed inside the body mesh due to concave geometry (armpits, etc.).
+    Pass 1 — Torso panels (front/back):
+        Smooth elliptical wrap using a *single reference ellipse* per panel
+        (computed from the panel's median-Y body cross-section).  Produces
+        uniform curvature without the terrain-like artifacts of per-vertex
+        body profile lookup.  Side-edge vertices (|dx/a| > 1) are blended
+        smoothly toward body center-Z instead of being left flat.
+
+    Pass 2 — Sleeve/collar panels:
+        a. Translate so stitch-vertex centroid aligns with opposing armhole.
+        b. Project onto a piecewise arm cylinder (center and radius queried
+           from the body mesh at each vertex's X position).  Each vertex's
+           circumferential coordinate (from SVD secondary axis) maps to an
+           angle θ on the cylinder, producing true Z curvature.
+
+    Pass 3 — resolve_initial_penetrations() should be called after this
+        function to push any remaining inside-body vertices outward.
 
     Modifies garment.positions in-place before Taichi field upload.
+
+    Args:
+        garment:        GarmentMesh to modify.
+        clearance:      Torso clearance in metres (default 15mm).
+        body_mesh_path: Path to physics body mesh for arm cylinder model.
     """
     from simulation.mesh.body_measurements import load_profile
 
@@ -431,72 +591,87 @@ def prewrap_panels_to_body(
     pos = garment.positions  # (N, 3) float32, modified in-place
     profile = load_profile("data/bodies/mannequin_profile.json")
 
-    _BACK_KEYWORDS = ("btorso", "back")
-    _FRONT_KEYWORDS = ("ftorso", "front")
-    _TORSO_KEYWORDS = _BACK_KEYWORDS + _FRONT_KEYWORDS
-    _TORSO_Y_MIN = 0.65   # below hip: body profile unreliable
-    _TORSO_Y_MAX = 1.60   # above shoulder: arm/collar geometry, not torso
+    _TORSO_Y_MIN = 0.65
+    _TORSO_Y_MAX = 1.60
 
-    # Two-pass processing: torso panels must be 3D-wrapped BEFORE sleeve panels are
-    # centroid-aligned, because the torso armhole vertex positions are the stable
-    # reference that sleeve panels align to.  Panel ordering in GarmentCode JSON is
-    # not guaranteed (sleeves can appear before torso), so we enforce the order here.
-
-    # --- Pass 1: 3D elliptical wrap for all torso panels ---
+    # ── Classify every panel ──────────────────────────────────────────────
     torso_vert_set: set[int] = set()
+    roles: list[str] = []
+
+    # First pass: identify torso panels (needed for fallback classification)
     for k, pid in enumerate(garment.panel_ids):
         pid_lower = pid.lower()
-        is_back = any(kw in pid_lower for kw in _BACK_KEYWORDS)
-        is_front = any(kw in pid_lower for kw in _FRONT_KEYWORDS)
+        if any(kw in pid_lower for kw in _TORSO_KEYWORDS):
+            torso_vert_set.update(range(offsets[k], offsets[k + 1]))
+
+    for k, pid in enumerate(garment.panel_ids):
+        roles.append(_classify_panel(pid, k, garment, offsets, torso_vert_set))
+
+    # ── Pass 1: Smooth elliptical wrap for torso panels ───────────────────
+    for k, pid in enumerate(garment.panel_ids):
+        role = roles[k]
+        is_back = role == "torso_back"
+        is_front = role == "torso_front"
         if not (is_back or is_front):
             continue
 
-        torso_vert_set.update(range(offsets[k], offsets[k + 1]))
+        panel_ys = pos[offsets[k]:offsets[k + 1], 1]
+        y_lo = max(float(panel_ys.min()), _TORSO_Y_MIN)
+        y_hi = min(float(panel_ys.max()), _TORSO_Y_MAX)
+        y_med = (y_lo + y_hi) / 2.0
 
-        # Project each vertex onto the body's ellipse at its Y height.
-        # sin(θ) = (vertex_x − center_x) / body_half_width gives the wrap angle
-        # directly from world X — correct for half-body panels (no panel_width needed).
-        #
-        # Vertices BEYOND the body's side (|sin_t| > 1) are seam/armhole vertices
-        # that extend past the body width.  Clamping them would collapse many adjacent
-        # vertices to the same point, zeroing rest-lengths.  Instead we keep their
-        # original X and set Z = center_z, which simultaneously:
-        #   • places front AND back seam vertices at the same Z → side-seam gap ≈ 0
-        #   • preserves relative X spacing → no rest-length collapse
+        # Single reference ellipse from panel median-Y cross-section.
+        # This eliminates per-vertex terrain artifacts while maintaining
+        # the correct overall curvature for the panel.
+        ref = profile.at_y(y_med)
+        a = ref.width / 2.0               # X semi-axis (body half-width)
+        b = ref.depth / 2.0 + clearance   # Z semi-axis + clearance
+        cx = ref.center_x
+        cz = ref.center_z
+
+        if a < 1e-4 or b < 1e-4:
+            continue
+
+        # Widen the mapping parameter to prevent vertical asymptotes at the edges
+        a_extended = a * 1.25
+
         for vi in range(offsets[k], offsets[k + 1]):
             py = float(pos[vi, 1])
             if py < _TORSO_Y_MIN or py > _TORSO_Y_MAX:
                 continue
-            sl = profile.at_y(py)
-            a_body = sl.width / 2    # body X half-extent
-            b_body = sl.depth / 2    # body Z half-extent
-            cx, cz = sl.center_x, sl.center_z
-            sin_t = (pos[vi, 0] - cx) / max(a_body, 1e-8)
-            if abs(sin_t) <= 1.0:
-                # Within body width: map to clearance ellipse surface
-                cos_t = float(np.sqrt(max(1.0 - sin_t * sin_t, 0.0)))
-                a_out = a_body + clearance
-                b_out = b_body + clearance
-                pos[vi, 0] = cx + a_out * sin_t
-                pos[vi, 2] = (cz - b_out * cos_t) if is_back else (cz + b_out * cos_t)
+
+            dx = float(pos[vi, 0]) - cx
+            t = dx / a_extended
+            
+            # Smooth shield function: Z drops off smoothly past the body boundary
+            # Using cosine: at dx=0 (center), z_offset = b. 
+            # at dx=a_extended (edge), z_offset = 0 (reaches body center_z).
+            t_clip = float(np.clip(t, -1.0, 1.0))
+            z_offset = b * float(np.cos(t_clip * (np.pi / 2.0)))
+
+            pos[vi, 0] = cx + dx  # X stays unchanged relative to center
+            if is_back:
+                pos[vi, 2] = cz - z_offset
             else:
-                # Beyond body side: preserve X, set Z to body-center depth.
-                # Both front AND back seam vertices land at the same Z → side-seam gap ≈ 0.
-                # Preserving X avoids rest-length collapse (no adjacent vertices collapse).
-                pos[vi, 2] = cz
+                pos[vi, 2] = cz + z_offset
 
-    # --- Pass 2: sleeve/collar panels — translate then rotate to align with torso armhole ---
-    # Torso vertices are now at their final 3D-wrapped positions and serve as the
-    # stable reference.  Only torso vertices are used for the centroid and SVD plane
-    # computation; sleeve-to-sleeve tube seam gaps are closed by stitch constraints.
+    # ── Pass 2: Sleeve panels — translate + arm-cylinder projection ───────
+    # Build arm centerlines (cached for both arms)
+    arm_models: dict[str, tuple] = {}
+
+    pairs = garment.stitch_pairs
+
     for k, pid in enumerate(garment.panel_ids):
+        if roles[k] not in ("sleeve", "other"):
+            continue
+        if roles[k] == "other":
+            # Non-sleeve, non-torso: just centroid-align (collars etc.)
+            pass
+
         pid_lower = pid.lower()
-        if any(kw in pid_lower for kw in _TORSO_KEYWORDS):
-            continue  # already handled in pass 1
-
         panel_set = set(range(offsets[k], offsets[k + 1]))
-        pairs = garment.stitch_pairs  # (S, 2) int32
 
+        # Find cross-panel stitch connections
         my_verts: list[int] = []
         their_torso_verts: list[int] = []
         their_all_verts: list[int] = []
@@ -513,22 +688,76 @@ def prewrap_panels_to_body(
             their_torso_verts.extend(tv[torso_cross].tolist())
 
         if not my_verts:
-            continue  # no cross-panel stitches — leave unchanged
+            continue
 
         my_arr = np.array(my_verts)
-        ref_arr = np.array(their_torso_verts) if their_torso_verts else np.array(their_all_verts)
-
-        my_centroid = pos[my_arr].mean(axis=0)
+        ref_arr = (np.array(their_torso_verts) if their_torso_verts
+                   else np.array(their_all_verts))
         ref_centroid = pos[ref_arr].mean(axis=0)
+
+        # Centroid translation
+        my_centroid = pos[my_arr].mean(axis=0)
         delta = ref_centroid - my_centroid
-        # Sleeve panels: GarmentCode already places them at the correct Z
-        # (front sleeve near z_front, back sleeve near z_back). Applying the
-        # full XYZ delta pulls both to body center Z — destroying that placement.
-        # Apply only XY alignment; let the sew phase handle remaining Z gaps.
-        _SLEEVE_KWS = ("sleeve",)
-        if any(kw in pid_lower for kw in _SLEEVE_KWS):
-            delta[2] = 0.0
         pos[offsets[k]:offsets[k + 1]] += delta
+
+        # ── Arm-cylinder projection (sleeve panels only) ──────────────
+        if roles[k] != "sleeve":
+            continue
+
+        is_right = "right" in pid_lower or float(pos[offsets[k]:offsets[k + 1], 0].mean()) < 0
+        x_sign = -1.0 if is_right else 1.0
+        arm_key = "right" if is_right else "left"
+
+        # Build arm model lazily (once per arm)
+        if arm_key not in arm_models:
+            arm_models[arm_key] = _build_arm_centerline(body_mesh_path, x_sign)
+
+        arm = arm_models[arm_key]
+
+        # Determine if this is a front or back sleeve half
+        is_front_sleeve = ("_f" in pid_lower or "front" in pid_lower or
+                           float(pos[offsets[k]:offsets[k + 1], 2].mean()) > 0.15)
+
+        start, end = offsets[k], offsets[k + 1]
+        pivot = pos[my_arr].mean(axis=0)  # armhole centroid post-translate
+        
+        # Use 2D panel vertices for direct 2D-to-3D cylinder projection.
+        # This completely bypasses the GarmentCode 3D rotation, avoiding coordinate mixing.
+        # Reason: GarmentCode's 3D rotation inextricably mixes the arm-length and circumferential 
+        # dimensions into world X/Y/Z. By projecting straight from the 2D panel space, 
+        # we can cleanly map 2D-Y to arm length (X-axis in world) and 2D-X to cylinder wrap angle.
+        if garment.verts_2d is None:
+            continue
+            
+        v2d = garment.verts_2d[start:end]
+        c2d = v2d.mean(axis=0)
+        centered_2d = v2d - c2d
+
+        for i, vi in enumerate(range(start, end)):
+            dy_2d = float(centered_2d[i, 1]) # arm length direction
+            dx_2d = float(centered_2d[i, 0]) # circumference direction
+            
+            # Map 2D-Y to World X (along arm axis)
+            # The sleeve extends outward. 2D Y goes from bottom (hem) to top (cap).
+            # Top of cap (positive dy_2d) is closer to body (closer to pivot).
+            x_along_arm = float(pivot[0]) - x_sign * dy_2d
+            
+            arm_cy, arm_cz, arm_r = _arm_at_x(arm, x_along_arm)
+            wrap_radius = arm_r + _SLEEVE_CLEARANCE
+            
+            # Angle: dx_2d is arc length. theta = arc_length / radius
+            theta = dx_2d / max(wrap_radius, 1e-4)
+            
+            pos[vi, 0] = x_along_arm
+            
+            # Determine base angle based on front vs back sleeve
+            # Front sleeves face +Z. Back sleeves face -Z.
+            base_angle = 0.0 if is_front_sleeve else np.pi
+            final_angle = base_angle + theta
+            
+            # Cylinder mapping
+            pos[vi, 1] = arm_cy - wrap_radius * float(np.sin(final_angle))
+            pos[vi, 2] = arm_cz + wrap_radius * float(np.cos(final_angle))
 
 
 def resolve_initial_penetrations(
