@@ -9,6 +9,11 @@ This monorepo is organized into specialized sub-projects, each exploring a diffe
 ```text
 virtual-try-on/
 │
+├── garment-sim/             # [Python] Modular garment simulation platform (XPBD in Taichi)
+│   ├── backend/            # Physics engine (Taichi kernels) & FastAPI web layer
+│   ├── frontend/           # Next.js + React Three Fiber viewer
+│   └── README.md           # Documentation for this specific engine
+│
 ├── mujoco-simulation/       # [Python] High-fidelity offline simulation
 │   ├── core/               # Physics stepping & model generation
 │   ├── config/             # Gravity, damping & continuum mechanics
@@ -18,6 +23,11 @@ virtual-try-on/
 │   ├── physics-core/       # The Rust XPBD solver (WASM)
 │   ├── src/v4/             # React Three Fiber frontend
 │   └── README.md           # Documentation for this specific engine
+│
+├── vestra-physics/                # [Rust + Web] High-performance real-time VTO engine
+│   ├── physics/                   # Rust XPBD solver (WASM, SIMD128)
+│   ├── src/                       # React Three Fiber frontend
+│   └── README.md                  # Documentation for this specific engine
 │
 └── README.md               # You are here
 
@@ -49,6 +59,27 @@ virtual-try-on/
 * **Advanced Collision:** Uses Analytic SDFs (Signed Distance Fields) for body collision and Spatial Hashing for self-collision.
 * **Skinning:** Maps high-res visual meshes (~15k verts) to low-res physics proxies (~1k verts).
 
+### 3. Garment Simulation Engine
+
+* **Location:** `/garment-sim`
+* **Focus:** XPBD (Extended Position-Based Dynamics) garment simulation draping 2D patterns onto 3D bodies.
+* **Tech Stack:** Python, Taichi Lang, Next.js, FastAPI.
+* **Key Features:**
+* Uses XPBD in Taichi kernels for high-performance physics.
+* Capable of taking 2D fabric pattern pieces, stitching them, and draping onto a 3D body.
+* Mesh-proxy collision with static spatial hashing and point-triangle projection.
+
+### 4. Vestra Physics Engine
+
+* **Location:** `/vestra-physics`
+* **Focus:** High-performance, real-time Virtual Try-On (VTO) engine built for the modern web.
+* **Tech Stack:** Rust (WASM, SIMD128, Rayon), React Three Fiber, TypeScript.
+* **Key Features:**
+* **Hybrid Compute Architecture:** Core physics solver in Rust (WASM) communicating with React frontend.
+* **SIMD & Multithreading:** Utilizes SIMD128 acceleration and Rayon for parallel self-collision.
+* **Zero-Copy Architecture:** Shared memory buffer between WASM and WebGL.
+* **Adaptive Throttling:** Intelligent step regulation preventing browser freezes on lower-end devices.
+
 ---
 
 ## 🚀 Getting Started
@@ -68,6 +99,22 @@ cd mujoco-simulation
 ```bash
 cd verlet-rapier-xpbd-simulation
 # Follow the setup in verlet-rapier-xpbd-simulation/README.md
+
+```
+
+### For the Garment Simulation Engine
+
+```bash
+cd garment-sim
+# Follow the setup in garment-sim/README.md
+
+```
+
+### For the Vestra Physics Engine
+
+```bash
+cd vestra-physics
+# Follow the setup in vestra-physics/README.md
 
 ```
 
