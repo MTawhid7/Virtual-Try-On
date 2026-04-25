@@ -1,0 +1,34 @@
+[build-system]
+requires = ["setuptools>=68.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "garment-sim"
+version = "0.1.0"
+description = "Modular garment simulation engine with XPBD solver and Taichi kernels"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+    "taichi>=1.7.0",
+    "numpy>=1.24.0",
+    "trimesh[easy]>=4.0.0",
+    "mapbox-earcut>=1.0.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.0",
+    "pytest-xdist",
+]
+api = [
+    "fastapi>=0.100",
+    "uvicorn[standard]>=0.24",
+    "pydantic>=2.0",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
+filterwarnings = [
+    "ignore:.*locale.getdefaultlocale.*:DeprecationWarning",
+]

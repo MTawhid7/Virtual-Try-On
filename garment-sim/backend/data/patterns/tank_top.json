@@ -1,0 +1,88 @@
+{
+  "name": "TankTop",
+  "panels": [
+    {
+      "id": "front",
+      "vertices_2d": [
+        [0.0, 0.0],
+        [0.40, 0.0],
+        [0.40, 0.25],
+        [0.40, 0.50],
+        [0.38, 0.55],
+        [0.34, 0.59],
+        [0.30, 0.62],
+        [0.25, 0.65],
+        [0.20, 0.67],
+        [0.15, 0.65],
+        [0.10, 0.62],
+        [0.06, 0.59],
+        [0.02, 0.55],
+        [0.0, 0.50],
+        [0.0, 0.25]
+      ],
+      "placement": {
+        "position": [-0.20, 0.85, 0.15],
+        "rotation_x_deg": -90,
+        "rotation_y_deg": 0
+      }
+    },
+    {
+      "id": "back",
+      "vertices_2d": [
+        [0.0, 0.0],
+        [0.40, 0.0],
+        [0.40, 0.25],
+        [0.40, 0.50],
+        [0.38, 0.55],
+        [0.35, 0.59],
+        [0.32, 0.62],
+        [0.29, 0.64],
+        [0.25, 0.66],
+        [0.20, 0.67],
+        [0.15, 0.66],
+        [0.11, 0.64],
+        [0.08, 0.62],
+        [0.05, 0.59],
+        [0.02, 0.55],
+        [0.0, 0.50],
+        [0.0, 0.25]
+      ],
+      "placement": {
+        "position": [0.20, 0.85, 0.01],
+        "rotation_x_deg": -90,
+        "rotation_y_deg": 180
+      }
+    }
+  ],
+  "stitches": [
+    {
+      "comment": "Right side seam",
+      "panel_a": "front",
+      "edge_a": [1, 3],
+      "panel_b": "back",
+      "edge_b": [16, 15]
+    },
+    {
+      "comment": "Left side seam",
+      "panel_a": "front",
+      "edge_a": [14, 13],
+      "panel_b": "back",
+      "edge_b": [0, 3]
+    },
+    {
+      "comment": "Right shoulder strap",
+      "panel_a": "front",
+      "edge_a": [4, 7],
+      "panel_b": "back",
+      "edge_b": [14, 8]
+    },
+    {
+      "comment": "Left shoulder strap",
+      "panel_a": "front",
+      "edge_a": [8, 12],
+      "panel_b": "back",
+      "edge_b": [9, 4]
+    }
+  ],
+  "fabric": "cotton"
+}
